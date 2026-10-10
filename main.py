@@ -122,6 +122,23 @@ def cmd_status(cfg) -> int:
     return 0
 
 
+def cmd_set_key(cfg) -> int:
+    import getpass
+
+    from tradingbot.solana_broker import keyring_set, load_keypair
+
+    secret = getpass.getpass("Privater Schlüssel der BOT-Wallet (Eingabe bleibt unsichtbar): ").strip()
+    try:
+        pubkey = load_keypair(secret).pubkey()
+    except Exception:  # noqa: BLE001
+        print("Das ist kein gültiger Solana-Schlüssel (erwartet: Base58-Text aus Phantom, nicht die Recovery-Phrase).")
+        return 2
+    keyring_set(secret)
+    print(f"Gespeichert im Betriebssystem-Schlüsselbund. Wallet-Adresse: {pubkey}")
+    print("Diese Adresse in Phantom mit dem Bot-Konto abgleichen. Eine .env-Datei ist nicht nötig.")
+    return 0
+
+
 def cmd_kill(cfg) -> int:
     path = Path(cfg.risk.kill_switch_file)
     path.write_text(f"Kill Switch ausgelöst {utcnow().isoformat()}\n")
@@ -140,6 +157,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--once", action="store_true", help="nur einen Durchlauf ausführen")
     sub.add_parser("status")
     sub.add_parser("kill")
+    sub.add_parser("set-key", help="Solana-Schlüssel sicher im Schlüsselbund ablegen")
     args = parser.parse_args(argv)
 
     load_env_file()
@@ -157,6 +175,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_run(cfg, args.once)
         if args.cmd == "status":
             return cmd_status(cfg)
+        if args.cmd == "set-key":
+            return cmd_set_key(cfg)
         return cmd_kill(cfg)
     except ConfigError as exc:
         print(f"Konfigurationsfehler: {exc}", file=sys.stderr)

@@ -119,3 +119,10 @@ Signale kommen weiter aus Börsendaten (SOL/USD), nur die Ausführung läuft auf
 - Der öffentliche Solana-RPC ist rate-limitiert; für Dauerbetrieb einen eigenen RPC-Anbieter eintragen.
 - Ein Swap kann bestätigt werden, nachdem der Bot das Zeitlimit meldet. Bei der Meldung „Status unklar“ die Wallet prüfen.
 - Jupiters API-URL/Konditionen können sich ändern (`jupiter_url` in der Config) – gegen die aktuelle Doku prüfen.
+
+### Schlüssel sicher ablegen (statt `.env`)
+`python main.py set-key` fragt den privaten Schlüssel der Bot-Wallet unsichtbar ab und speichert ihn im
+Betriebssystem-Schlüsselbund (macOS Keychain, Windows Credential Manager, Linux Secret Service). Der Bot nutzt ihn
+automatisch; eine Umgebungsvariable hat Vorrang. In Phantom: Konto-Menü → Settings → Manage Accounts → Bot-Konto →
+Show Private Key (nie die Recovery-Phrase und nie das Hauptkonto). Auf einem Linux-Server ohne Desktop gibt es evtl.
+keinen Schlüsselbund – dann `.env` mit Dateirechten `chmod 600` nutzen.

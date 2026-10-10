@@ -27,6 +27,24 @@ SOL_DECIMALS, USDC_DECIMALS = 9, 6
 BASE_TX_FEE_LAMPORTS = 5000
 
 
+KEYRING_SERVICE = "tradingbot-solana"
+
+
+def keyring_get() -> str:
+    try:
+        import keyring
+
+        return keyring.get_password(KEYRING_SERVICE, "private_key") or ""
+    except Exception:  # noqa: BLE001 - kein Schlüsselbund verfügbar
+        return ""
+
+
+def keyring_set(secret: str) -> None:
+    import keyring
+
+    keyring.set_password(KEYRING_SERVICE, "private_key", secret.strip())
+
+
 def load_keypair(secret: str):
     """Akzeptiert Phantom-Export (Base58) oder ein JSON-Array mit 64 Bytes (Solana-CLI-Format)."""
     from solders.keypair import Keypair
@@ -45,7 +63,10 @@ class SolanaBroker:
         self.sc = cfg.solana
         self.http = session or requests.Session()
         if keypair is None:
-            keypair = load_keypair(os.environ.get(self.sc.private_key_env, ""))
+            secret = os.environ.get(self.sc.private_key_env, "") or keyring_get()
+            if not secret:
+                raise ValueError("Kein Solana-Schlüssel gefunden (Umgebungsvariable oder 'python main.py set-key').")
+            keypair = load_keypair(secret)
         self.kp = keypair
         self.owner = str(keypair.pubkey())
 

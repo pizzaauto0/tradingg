@@ -143,9 +143,12 @@ class Config:
 
     def live_credentials(self) -> tuple[str, str]:
         if self.broker == "solana":
-            key = os.environ.get(self.solana.private_key_env, "")
+            from .solana_broker import keyring_get
+
+            key = os.environ.get(self.solana.private_key_env, "") or keyring_get()
             if not key:
-                raise ConfigError(f"Live-Modus (solana) benötigt die Umgebungsvariable {self.solana.private_key_env}.")
+                raise ConfigError(f"Live-Modus (solana) benötigt den Schlüssel: Umgebungsvariable "
+                                  f"{self.solana.private_key_env} oder 'python main.py set-key'.")
             return key, ""
         key = os.environ.get(self.exchange.api_key_env, "")
         secret = os.environ.get(self.exchange.api_secret_env, "")

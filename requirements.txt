@@ -6,3 +6,4 @@ requests>=2.31
 anthropic>=0.40      # nur für das LLM-Recherche-Modul (optional)
 pytest>=8.0          # nur für die Tests
 solders>=0.21      # nur für broker: solana
+keyring>=24        # nur für broker: solana (sichere Schlüsselablage)

@@ -112,3 +112,14 @@ def test_load_keypair_formats():
     k = Keypair()
     assert str(load_keypair(str(k)).pubkey()) == str(k.pubkey())
     assert str(load_keypair(str(list(bytes(k)))).pubkey()) == str(k.pubkey())
+
+
+def test_keyring_fallback(monkeypatch):
+    from solders.keypair import Keypair
+    import tradingbot.solana_broker as sb
+    k = Keypair()
+    monkeypatch.delenv("SOLANA_PRIVATE_KEY", raising=False)
+    monkeypatch.setattr(sb, "keyring_get", lambda: str(k))
+    cfg = Config(broker="solana"); cfg.market.symbols = ["SOL/USD"]
+    assert sb.SolanaBroker(cfg.validate(), session=object()).owner == str(k.pubkey())
+    assert cfg.live_credentials()[0] == str(k)
