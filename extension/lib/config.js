@@ -1,13 +1,25 @@
 // Standard-Konfiguration (entspricht config.solana.yaml des Python-Bots) und Validierung.
 import { timeframeSeconds } from "./util.js";
 
+// Handelbare Assets (nur liquide Majors, keine Memecoins). mint = Token-Adresse auf Solana; die Nachkommastellen werden
+// zur Laufzeit per RPC gelesen. Die Adressen für BTC/ETH sind Wormhole-Wrapped-Token – bitte selbst gegen einen
+// Solana-Explorer prüfen (in den Einstellungen überschreibbar). Falsche Adressen fängt der Preisabgleich gegen die Börsenkurse ab.
+export const ASSETS = {
+  SOL: { symbol: "SOL/USD", kraken: "SOLUSD", bitstamp: "solusd", mint: "So11111111111111111111111111111111111111112" },
+  BTC: { symbol: "BTC/USD", kraken: "XBTUSD", bitstamp: "btcusd", mint: "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh" },
+  ETH: { symbol: "ETH/USD", kraken: "ETHUSD", bitstamp: "ethusd", mint: "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs" },
+};
+export const symbolOf = (base) => ASSETS[base].symbol;
+export const baseOf = (symbol) => symbol.split("/")[0];
+
 export const DEFAULTS = {
   liveTrading: false, // Paper-Modus ist Standard
+  assets: ["SOL", "BTC", "ETH"], // gleichzeitig beobachtete/gehandelte Märkte
   timeframe: "15m", // 5m | 15m | 30m | 1h
   capital: { start: 300 }, // Paper: Startguthaben. Live: maximal eingesetztes USDC
   risk: {
     riskPerTradePct: 1.0, maxDailyLossPct: 5.0, closePositionsOnDailyLimit: true,
-    maxOpenPositions: 1, maxPositionPct: 50.0, atrPeriod: 14, atrStopMult: 2.0, takeProfitRr: 2.0,
+    maxOpenPositions: 2, maxPositionPct: 50.0, atrPeriod: 14, atrStopMult: 2.0, takeProfitRr: 2.0,
   },
   costs: { feePct: 0.10, slippagePct: 0.15 },
   backtest: {
@@ -19,6 +31,7 @@ export const DEFAULTS = {
     rpcUrl: "https://api.mainnet-beta.solana.com",
     jupiterUrl: "https://lite-api.jup.ag/swap/v1",
     usdcMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    mints: {}, // optionale Überschreibung der Token-Adressen, z. B. { BTC: "…" }
     solReserve: 0.05, slippageBps: 50, maxPriceImpactPct: 0.5, maxDeviationPct: 1.0, priorityFeeLamports: 50000,
   },
   llm: { enabled: false, model: "claude-sonnet-5-5", apiKey: "", maxTokens: 4000 },
@@ -31,7 +44,8 @@ export function mergeConfig(base, over) {
   const out = Array.isArray(base) ? [...base] : { ...base };
   for (const [k, v] of Object.entries(over || {})) {
     if (!(k in base)) continue; // unbekannte Schlüssel ignorieren
-    out[k] = v && typeof v === "object" && !Array.isArray(v) ? mergeConfig(base[k], v) : v;
+    const open = base[k] && typeof base[k] === "object" && !Array.isArray(base[k]) && Object.keys(base[k]).length === 0;
+    out[k] = v && typeof v === "object" && !Array.isArray(v) && !open ? mergeConfig(base[k], v) : v;
   }
   return out;
 }
@@ -39,6 +53,12 @@ export function mergeConfig(base, over) {
 export function validateConfig(c) {
   const fail = (msg) => { throw new Error(msg); };
   if (typeof c.liveTrading !== "boolean") fail("liveTrading muss true/false sein.");
+  if (!Array.isArray(c.assets) || !c.assets.length || c.assets.some((a) => !Object.hasOwn(ASSETS, a))) {
+    fail(`assets muss eine nicht leere Liste aus ${Object.keys(ASSETS).join(", ")} sein.`);
+  }
+  for (const [k, m] of Object.entries(c.solana.mints || {})) {
+    if (!Object.hasOwn(ASSETS, k) || (m && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(m))) fail(`Ungültige Token-Adresse für ${k}.`);
+  }
   if (!ALLOWED_TIMEFRAMES.includes(c.timeframe)) fail(`Zeitrahmen muss einer von ${ALLOWED_TIMEFRAMES.join(", ")} sein.`);
   timeframeSeconds(c.timeframe);
   if (!(c.capital.start > 0)) fail("Startkapital muss > 0 sein.");

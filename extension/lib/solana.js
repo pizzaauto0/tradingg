@@ -2,6 +2,7 @@
 // KEIN Stop bei einer Gegenseite: der Stop-Loss wird vom Bot überwacht und bei Auslösung per Swap verkauft.
 import nacl from "./nacl.js";
 import { b58decode, b58encode, b64decode, b64encode, sleep } from "./util.js";
+import { ASSETS, baseOf } from "./config.js";
 
 export const SOL_MINT = "So11111111111111111111111111111111111111112";
 const SOL_DECIMALS = 9, USDC_DECIMALS = 6, BASE_TX_FEE_LAMPORTS = 5000;
@@ -55,6 +56,20 @@ export class SolanaWallet {
   constructor(cfg, secretKey, fetchFn = fetch, address = null) {
     this.cfg = cfg; this.sc = cfg.solana; this.secretKey = secretKey; this.fetch = fetchFn;
     this.address = address ?? b58encode(secretKey.slice(32));
+    this.decimalsCache = { [SOL_MINT]: SOL_DECIMALS, [cfg.solana.usdcMint]: USDC_DECIMALS };
+    this.prices = {};
+  }
+
+  hintPrices(prices) { this.prices = prices; } // für die Gebührenumrechnung in USD
+
+  mintOf(symbol) {
+    const base = baseOf(symbol);
+    return this.sc.mints?.[base] || ASSETS[base].mint;
+  }
+
+  async decimals(mint) { // Nachkommastellen werden von der Chain gelesen, nicht angenommen
+    if (this.decimalsCache[mint] == null) this.decimalsCache[mint] = (await this.rpc("getTokenSupply", [mint])).value.decimals;
+    return this.decimalsCache[mint];
   }
 
   async rpc(method, params) {
@@ -68,13 +83,19 @@ export class SolanaWallet {
 
   async solBalance() { return (await this.rpc("getBalance", [this.address, { commitment: "confirmed" }])).value / 10 ** SOL_DECIMALS; }
 
-  async usdcBalance() {
-    const res = await this.rpc("getTokenAccountsByOwner", [this.address, { mint: this.sc.usdcMint }, { encoding: "jsonParsed", commitment: "confirmed" }]);
+  async tokenBalance(mint) {
+    const res = await this.rpc("getTokenAccountsByOwner", [this.address, { mint }, { encoding: "jsonParsed", commitment: "confirmed" }]);
     return res.value.reduce((s, a) => s + (a.account.data.parsed.info.tokenAmount.uiAmount || 0), 0);
   }
 
+  usdcBalance() { return this.tokenBalance(this.sc.usdcMint); }
   cash() { return this.usdcBalance(); }
-  async baseBalance() { return Math.max((await this.solBalance()) - this.sc.solReserve, 0); }
+
+  // Menge des Assets, die verkauft werden darf (bei SOL bleibt die Gebühren-Reserve stehen).
+  async baseBalance(symbol) {
+    const mint = this.mintOf(symbol);
+    return mint === SOL_MINT ? Math.max((await this.solBalance()) - this.sc.solReserve, 0) : this.tokenBalance(mint);
+  }
 
   async jupiter(path, init) {
     const resp = await this.fetch(`${this.sc.jupiterUrl}${path}`, init);
@@ -114,48 +135,54 @@ export class SolanaWallet {
     throw new Error(`Transaktion ${signature} nicht bestätigt (Status unklar – Wallet prüfen!)`);
   }
 
-  checkQuote(q, side, refPrice) {
+  // Schutz gegen falsche Token-Adressen, Fehlkurse und dünne Liquidität: Jupiter-Preis muss zum Börsenkurs passen.
+  checkQuote(q, side, refPrice, assetDecimals) {
     const inAmt = Number(q.inAmount), outAmt = Number(q.outAmount);
-    const price = side === "buy" ? (inAmt / 10 ** USDC_DECIMALS) / (outAmt / 10 ** SOL_DECIMALS)
-      : (outAmt / 10 ** USDC_DECIMALS) / (inAmt / 10 ** SOL_DECIMALS);
+    const price = side === "buy" ? (inAmt / 10 ** USDC_DECIMALS) / (outAmt / 10 ** assetDecimals)
+      : (outAmt / 10 ** USDC_DECIMALS) / (inAmt / 10 ** assetDecimals);
     const dev = Math.abs(price / refPrice - 1) * 100;
-    if (dev > this.sc.maxDeviationPct) throw new Error(`Jupiter-Preis ${price.toFixed(4)} weicht ${dev.toFixed(2)}% von Referenz ${refPrice.toFixed(4)} ab – abgebrochen`);
+    if (!(dev <= this.sc.maxDeviationPct)) throw new Error(`Jupiter-Preis ${price.toFixed(4)} weicht ${dev.toFixed(2)}% von Referenz ${refPrice.toFixed(4)} ab – abgebrochen`);
     const impact = Number(q.priceImpactPct || 0) * 100;
     if (impact > this.sc.maxPriceImpactPct) throw new Error(`Preisauswirkung ${impact.toFixed(2)}% zu hoch – abgebrochen`);
   }
 
-  // Gibt { sol, price, fee } anhand der tatsächlichen Wallet-Salden zurück.
-  async swap(side, amountRaw, refPrice) {
-    const [inMint, outMint] = side === "buy" ? [this.sc.usdcMint, SOL_MINT] : [SOL_MINT, this.sc.usdcMint];
+  // Gibt { amount, price, fee } anhand der tatsächlichen Wallet-Salden zurück.
+  async swap(side, symbol, amountRaw, refPrice) {
+    const mint = this.mintOf(symbol), isSol = mint === SOL_MINT, dec = await this.decimals(mint);
+    const [inMint, outMint] = side === "buy" ? [this.sc.usdcMint, mint] : [mint, this.sc.usdcMint];
     const q = await this.quote(inMint, outMint, amountRaw);
-    this.checkQuote(q, side, refPrice);
-    const [sol0, usdc0] = [await this.solBalance(), await this.usdcBalance()];
+    this.checkQuote(q, side, refPrice, dec);
+    const bal = async () => [await this.solBalance(), await this.tokenBalance(mint), await this.usdcBalance()];
+    const [sol0, tok0, usdc0] = await bal();
     const signature = await this.signAndSend(await this.swapTx(q));
     await this.confirm(signature);
-    const [sol1, usdc1] = [await this.solBalance(), await this.usdcBalance()];
+    const [sol1, tok1, usdc1] = await bal();
     const feeSol = (BASE_TX_FEE_LAMPORTS + this.sc.priorityFeeLamports) / 10 ** SOL_DECIMALS;
-    const solMoved = Math.abs(sol1 - sol0 + (side === "buy" ? feeSol : -feeSol)), usdcMoved = Math.abs(usdc1 - usdc0);
-    if (!(solMoved > 0 && usdcMoved > 0)) throw new Error(`Swap ${signature} bestätigt, aber keine Saldenänderung erkannt – Wallet prüfen!`);
-    const price = usdcMoved / solMoved;
-    return { sol: solMoved, price, fee: feeSol * price, signature };
+    // Menge des gehandelten Assets; bei SOL die Netzwerkgebühr herausrechnen (sie fällt im selben Konto an)
+    const moved = isSol ? Math.abs(sol1 - sol0 + (side === "buy" ? feeSol : -feeSol)) : Math.abs(tok1 - tok0);
+    const usdcMoved = Math.abs(usdc1 - usdc0);
+    if (!(moved > 0 && usdcMoved > 0)) throw new Error(`Swap ${signature} bestätigt, aber keine Saldenänderung erkannt – Wallet prüfen!`);
+    const solUsd = this.prices["SOL/USD"] ?? 150;
+    return { amount: moved, price: usdcMoved / moved, fee: feeSol * solUsd, signature };
   }
 
-  async openLong(amount, stop, refPrice) {
+  async openLong(symbol, amount, stop, refPrice) {
     const buffer = 1 + this.sc.slippageBps / 10_000 + 0.001;
     const usdc = await this.usdcBalance();
     const spend = Math.min(amount * refPrice * buffer, usdc);
     if (spend < 1) throw new InsufficientFunds(`USDC-Guthaben (${usdc.toFixed(2)}) zu gering`);
     if ((await this.solBalance()) < this.sc.solReserve) throw new InsufficientFunds(`SOL-Reserve für Gebühren unterschritten (< ${this.sc.solReserve})`);
-    const r = await this.swap("buy", Math.floor(spend * 10 ** USDC_DECIMALS), refPrice);
-    return { price: r.price, amount: r.sol, fee: r.fee, orderId: r.signature };
+    const r = await this.swap("buy", symbol, Math.floor(spend * 10 ** USDC_DECIMALS), refPrice);
+    return { price: r.price, amount: r.amount, fee: r.fee, orderId: r.signature };
   }
 
   async closeLong(pos, refPrice) {
-    const sellable = Math.min(pos.amount, (await this.solBalance()) - this.sc.solReserve);
-    const raw = Math.floor(sellable * 10 ** SOL_DECIMALS);
-    if (raw <= 0) throw new InsufficientFunds("Keine verkaufbare SOL-Menge in der Wallet");
-    const r = await this.swap("sell", raw, refPrice);
-    return { price: r.price, amount: r.sol, fee: r.fee, orderId: r.signature };
+    const mint = this.mintOf(pos.symbol), dec = await this.decimals(mint);
+    const sellable = Math.min(pos.amount, await this.baseBalance(pos.symbol));
+    const raw = Math.floor(sellable * 10 ** dec);
+    if (raw <= 0) throw new InsufficientFunds(`Keine verkaufbare Menge ${pos.symbol} in der Wallet`);
+    const r = await this.swap("sell", pos.symbol, raw, refPrice);
+    return { price: r.price, amount: r.amount, fee: r.fee, orderId: r.signature };
   }
 
   // Bot-seitiger Stop: Kurs hat den Stop erreicht -> sofort per Swap verkaufen.
@@ -173,7 +200,7 @@ export class PaperBroker {
     this.s = state.paper = state.paper || { cash: cfg.capital.start };
   }
   async cash() { return this.s.cash; }
-  async openLong(amount, stop, refPrice) {
+  async openLong(symbol, amount, stop, refPrice) {
     const px = refPrice * (1 + this.slip), fee = amount * px * this.fee, cost = amount * px + fee;
     if (cost > this.s.cash + 1e-9) throw new InsufficientFunds(`Paper-Guthaben ${this.s.cash.toFixed(2)} reicht nicht für ${cost.toFixed(2)}`);
     this.s.cash -= cost;

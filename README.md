@@ -132,6 +132,6 @@ Show Private Key (nie die Recovery-Phrase und nie das Hauptkonto). Auf einem Lin
 keinen Schlüsselbund – dann `.env` mit Dateirechten `chmod 600` nutzen.
 
 ## Browser-Extension
-Der Bot existiert zusätzlich als Chrome-Extension (Ordner `extension/`, SOL/USDC über Jupiter, Paper-Modus Standard).
+Der Bot existiert zusätzlich als Chrome-Extension (Ordner `extension/`, SOL/BTC/ETH gegen USDC über Jupiter, Paper-Modus Standard).
 Installation und ausdrückliche Einschränkungen (Browser muss laufen, Wallet nach Neustart entsperren, Stop nur bot-seitig):
 siehe `extension/README.md`.

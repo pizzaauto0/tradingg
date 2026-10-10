@@ -1,8 +1,8 @@
-// Marktdaten (öffentliche REST-APIs, keine Schlüssel): Kraken für Live-Kerzen, Bitstamp (Fallback Kraken) für die Historie.
+// Marktdaten (öffentliche REST-APIs, keine Schlüssel) je Asset: Kraken für Live-Kerzen, Bitstamp (Fallback Kraken) für die Historie.
 // Kerzen-Format: { t: [ms], open: [], high: [], low: [], close: [], volume: [] }
 import { timeframeSeconds } from "./util.js";
+import { ASSETS, baseOf } from "./config.js";
 
-const KRAKEN_PAIR = "SOLUSD", BITSTAMP_PAIR = "solusd";
 const KRAKEN_INTERVAL = { "5m": 5, "15m": 15, "30m": 30, "1h": 60 };
 
 export const emptyFrame = () => ({ t: [], open: [], high: [], low: [], close: [], volume: [] });
@@ -24,8 +24,8 @@ async function getJson(fetchFn, url) {
 }
 
 // Letzte ~720 Kerzen; die letzte kann noch in Bildung sein.
-export async function fetchRecent(cfg, fetchFn = fetch) {
-  const body = await getJson(fetchFn, `https://api.kraken.com/0/public/OHLC?pair=${KRAKEN_PAIR}&interval=${KRAKEN_INTERVAL[cfg.timeframe]}`);
+export async function fetchRecent(cfg, symbol, fetchFn = fetch) {
+  const body = await getJson(fetchFn, `https://api.kraken.com/0/public/OHLC?pair=${ASSETS[baseOf(symbol)].kraken}&interval=${KRAKEN_INTERVAL[cfg.timeframe]}`);
   if (body.error?.length) throw new Error(`Kraken: ${body.error.join(", ")}`);
   const key = Object.keys(body.result).find((k) => k !== "last");
   const df = rowsToFrame(body.result[key].map((r) => ({ t: r[0] * 1000, o: +r[1], h: +r[2], l: +r[3], c: +r[4], v: +r[6] })));
@@ -33,12 +33,12 @@ export async function fetchRecent(cfg, fetchFn = fetch) {
   return df;
 }
 
-async function bitstampHistory(cfg, n, fetchFn) {
+async function bitstampHistory(cfg, symbol, n, fetchFn) {
   const step = timeframeSeconds(cfg.timeframe);
   let end = Math.floor(Date.now() / 1000), rows = [], empty = 0;
   while (rows.length < n && empty < 2) {
     const start = end - 1000 * step;
-    const body = await getJson(fetchFn, `https://www.bitstamp.net/api/v2/ohlc/${BITSTAMP_PAIR}/?step=${step}&limit=1000&start=${start}&end=${end}`);
+    const body = await getJson(fetchFn, `https://www.bitstamp.net/api/v2/ohlc/${ASSETS[baseOf(symbol)].bitstamp}/?step=${step}&limit=1000&start=${start}&end=${end}`);
     const page = (body?.data?.ohlc ?? []).map((k) => ({ t: +k.timestamp * 1000, o: +k.open, h: +k.high, l: +k.low, c: +k.close, v: +k.volume }));
     empty = page.length ? 0 : empty + 1;
     rows = rows.concat(page);
@@ -48,16 +48,16 @@ async function bitstampHistory(cfg, n, fetchFn) {
 }
 
 // Historie für Backtests; schneidet die noch offene letzte Kerze ab.
-export async function fetchHistory(cfg, n = cfg.pipeline.historyCandles, fetchFn = fetch) {
+export async function fetchHistory(cfg, symbol, n = cfg.pipeline.historyCandles, fetchFn = fetch) {
   let df = null;
   try {
-    df = rowsToFrame(await bitstampHistory(cfg, n, fetchFn));
+    df = rowsToFrame(await bitstampHistory(cfg, symbol, n, fetchFn));
   } catch (e) {
     console.warn("Bitstamp-Historie fehlgeschlagen:", e.message);
   }
   if (!df || df.close.length < cfg.backtest.minCandles) {
     try {
-      const kr = await fetchRecent(cfg, fetchFn);
+      const kr = await fetchRecent(cfg, symbol, fetchFn);
       if (!df || kr.close.length > df.close.length) df = kr;
     } catch (e) {
       if (!df) throw e;

@@ -17,7 +17,7 @@ const permissive = { backtest: { minTrades: 0, minReturnPct: -1000, maxDrawdownP
 
 async function setupPaper(world) {
   installFakeChrome();
-  await handle({ type: "saveConfig", patch: permissive });
+  await handle({ type: "saveConfig", patch: { ...permissive, assets: ["SOL"] } });
   const f = marketFetch(world);
   // Nur die Breakout-Strategie zulassen: fester Datensatz, deterministischer Einstieg
   const st = await getStatus();
@@ -154,14 +154,79 @@ test("Aktivität: Bot zeigt Kurs, Marktphase, Strategie und protokolliert jede g
   await whenIdle();
   await runTick({ fetchFn: f, now: at(world.df.t.at(-1)) });
   let s = await getStatus();
-  assert.equal(s.state.activity.regime, "uptrend");
-  assert.equal(s.state.activity.strategy, "breakout(lookback=10,exit_lookback=5)");
-  assert.equal(typeof s.state.activity.signal, "boolean");
-  assert.ok(s.state.activity.nextCandleAt > world.df.t.at(-1));
+  const act = s.state.activity["SOL/USD"];
+  assert.equal(act.regime, "uptrend");
+  assert.equal(act.strategy, "breakout(lookback=10,exit_lookback=5)");
+  assert.equal(typeof act.signal, "boolean");
+  assert.ok(act.nextCandleAt > world.df.t.at(-1));
   assert.equal(s.state.decisions.length, 0, "erste Kerze wird nur gesehen, nicht bewertet");
   world.df = trendWorld(1501, false).df; world.df.t = world.df.t.map((t) => t + TF_MS);
   await runTick({ fetchFn: f, now: at(world.df.t.at(-1)) });
   s = await getStatus();
-  assert.match(s.state.decisions[0].text, /Kerze geprüft · uptrend: breakout.*Signal (JA|nein)/);
+  assert.match(s.state.decisions[0].text, /SOL\/USD · Kerze geprüft · uptrend: breakout.*Signal (JA|nein)/);
   await handle({ type: "tickNow" }, f);
+});
+
+
+// ---- mehrere Märkte gleichzeitig ----
+const SYMS = ["SOL/USD", "BTC/USD", "ETH/USD"];
+const scaled = (df, k) => ({ ...df, open: df.open.map((x) => x * k), high: df.high.map((x) => x * k), low: df.low.map((x) => x * k), close: df.close.map((x) => x * k) });
+
+test("Mehrere Märkte: Backtest je Markt, gleichzeitige Positionen, Positionslimit gilt über alle Märkte", async () => {
+  installFakeChrome();
+  await handle({ type: "saveConfig", patch: { ...permissive, assets: ["SOL", "BTC", "ETH"] } }); // maxOpenPositions Standard: 2
+  const world = { dfs: Object.fromEntries(SYMS.map((s, i) => [s, scaled(trendWorld(1500).df, [1, 400, 25][i])])) };
+  const f = marketFetch(world);
+  const res = await handle({ type: "research" }, f);
+  assert.equal(res.problems.length, 0);
+  const s0 = await getStatus();
+  assert.deepEqual([...new Set(s0.state.report.map((r) => r.symbol))].sort(), [...SYMS].sort());
+
+  const key = "botState_paper", st = (await chrome.storage.local.get(key))[key];
+  st.approved = SYMS.map((symbol) => ({ symbol, timeframe: "15m", spec: { type: "breakout", params: { lookback: 10, exit_lookback: 5 }, regimes: ["uptrend"] },
+    name: "breakout(10,5)", metrics: { sharpe: 2, return_pct: 5 } }));
+  st.lastRefresh = new Date().toISOString();
+  await chrome.storage.local.set({ [key]: st });
+  await handle({ type: "start" }, f);
+  await whenIdle();
+  await runTick({ fetchFn: f, now: at(world.dfs["SOL/USD"].t.at(-1)) });
+
+  world.dfs = Object.fromEntries(SYMS.map((s, i) => { const d = trendWorld(1501, true).df; d.t = d.t.map((t) => t + TF_MS); return [s, scaled(d, [1, 400, 25][i])]; }));
+  await runTick({ fetchFn: f, now: at(world.dfs["SOL/USD"].t.at(-1)) });
+  const s = await getStatus();
+  assert.deepEqual(Object.keys(s.state.positions).sort(), ["BTC/USD", "SOL/USD"], "zwei Positionen, das Limit (2) blockt ETH");
+  assert.equal(Object.keys(s.state.activity).length, 3, "alle drei Märkte werden beobachtet");
+  for (const pos of Object.values(s.state.positions)) {
+    assert.ok(pos.stop < pos.entryPrice && pos.amount * pos.entryPrice <= 300 * 0.5 * 1.01);
+    assert.ok(pos.amount * (pos.entryPrice - pos.stop) <= 300 * 0.01 * 1.0001 + 1e-9, "Risiko je Trade <= 1 %");
+  }
+  assert.equal(s.trades.filter((t) => t.action === "ENTRY").length, 2);
+
+  await handle({ type: "kill" }, f);                       // Not-Aus schließt alle Positionen
+  const k = await getStatus();
+  assert.equal(Object.keys(k.state.positions).length, 0);
+  assert.equal(k.trades.filter((t) => t.reason === "Not-Aus").length, 2);
+});
+
+test("Ein ausgefallener Markt stoppt die anderen nicht", async () => {
+  installFakeChrome();
+  await handle({ type: "saveConfig", patch: { ...permissive, assets: ["SOL", "BTC"] } });
+  const world = { dfs: { "SOL/USD": trendWorld(1500).df } }; // BTC liefert 404
+  const f = marketFetch(world);
+  const res = await handle({ type: "research" }, f);
+  assert.equal(res.problems.length, 1); assert.match(res.problems[0], /BTC\/USD/);
+  const key = "botState_paper", st = (await chrome.storage.local.get(key))[key];
+  st.enabled = true; st.lastRefresh = new Date().toISOString();
+  await chrome.storage.local.set({ [key]: st });
+  await runTick({ fetchFn: f, now: at(world.dfs["SOL/USD"].t.at(-1)) });
+  const s = await getStatus();
+  assert.ok(s.state.activity["SOL/USD"].price > 0);
+  assert.match(s.state.activity["BTC/USD"].error, /404/);
+});
+
+test("Konfiguration: Assets und Token-Adressen werden geprüft", () => {
+  assert.throws(() => validateConfig(mergeConfig(DEFAULTS, { assets: [] })), /assets/);
+  assert.throws(() => validateConfig(mergeConfig(DEFAULTS, { assets: ["DOGE"] })), /assets/);
+  assert.throws(() => validateConfig(mergeConfig(DEFAULTS, { solana: { mints: { BTC: "kein-mint" } } })), /Token-Adresse/);
+  validateConfig(mergeConfig(DEFAULTS, { solana: { mints: { BTC: "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh" } } }));
 });

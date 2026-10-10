@@ -1,7 +1,7 @@
 // Steuerung: Konfiguration, Zustand, Durchlauf (Tick) und alle Aktionen, die das Popup auslösen kann.
 import { DEFAULTS, mergeConfig, validateConfig } from "./config.js";
 import { getLocal, setLocal, appendTrade } from "./store.js";
-import { Engine, SYMBOL } from "./engine.js";
+import { Engine } from "./engine.js";
 import { fetchRecent } from "./data.js";
 import { researchAndBacktest } from "./pipeline.js";
 import { PaperBroker, SolanaWallet, generateKeypair, parseSecretKey } from "./solana.js";
@@ -87,7 +87,7 @@ async function tickOnce({ fetchFn = fetch, now = new Date() } = {}) {
     }
     const engine = new Engine({
       cfg, state, broker, notify,
-      fetchRecent: () => fetchRecent(cfg, fetchFn),
+      fetchRecent: (symbol) => fetchRecent(cfg, symbol, fetchFn),
       logTrade: appendTrade,
       save: () => setLocal(stateKey(cfg), state),
       refresher: () => researchAndBacktest(cfg, fetchFn),
@@ -116,7 +116,7 @@ export async function getStatus() {
     cfg: safeCfg,
     state: { enabled: state.enabled, killRequested: !!state.killRequested, locked: !!state.locked, pending: state.pending || null,
       positions: state.positions, risk: state.risk || {}, paperCash: state.paper?.cash ?? null, approved: state.approved,
-      report: state.report, activity: state.activity || null, decisions: (state.decisions || []).slice(-8).reverse(), status: state.status || null, lastRefresh: state.lastRefresh || null, lastTick: state.lastTick || null, lastError: state.lastError || null },
+      report: state.report, activity: state.activity || {}, decisions: (state.decisions || []).slice(-10).reverse(), status: state.status || null, lastRefresh: state.lastRefresh || null, lastTick: state.lastTick || null, lastError: state.lastError || null },
     vault: { exists: await hasVault(), address: await vaultAddress(), unlocked: !!(await getUnlockedKey()) },
     trades: (await getLocal("trades", [])).slice(-50).reverse(),
     events: (await getLocal("eventLog", [])).slice(-30).reverse(),
@@ -155,7 +155,7 @@ export async function handle(msg, fetchFn = fetch) {
       const st = await loadState(cfg);
       Object.assign(st, { approved: res.approved, report: res.report, lastRefresh: new Date().toISOString() });
       await setLocal(stateKey(cfg), st);
-      return { approved: res.approved.length, tested: res.report.length, candles: res.candles };
+      return { approved: res.approved.length, tested: res.report.length, candles: res.candles, problems: res.problems };
     }
     case "balances": {
       const address = await vaultAddress();
@@ -190,4 +190,3 @@ export async function handle(msg, fetchFn = fetch) {
   }
 }
 
-export { SYMBOL };

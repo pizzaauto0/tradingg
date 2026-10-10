@@ -2,7 +2,8 @@
 
 Der komplette Bot läuft als Erweiterung im Browser: Marktanalyse, Strategie-Recherche (optional per LLM), Backtest mit
 Gebühren und Slippage, Strategie-Auswahl je Marktphase, Risikomanagement, Not-Aus und Trade-Log mit Begründung.
-Gehandelt wird **SOL ↔ USDC auf Solana über Jupiter** mit einer eigenen Bot-Wallet. **Paper-Modus ist Standard.**
+Gehandelt werden **mehrere Märkte gleichzeitig: SOL, BTC und ETH gegen USDC auf Solana über Jupiter** (einzeln in den
+Optionen abschaltbar) mit einer eigenen Bot-Wallet. **Paper-Modus ist Standard.**
 Die Logik ist ein 1:1-Port des Python-Bots (Kennzahlen stimmen in den Tests auf 6 Nachkommastellen überein).
 
 > **Keine Anlageberatung, keine Gewinngarantie.** Nur Geld einsetzen, dessen Totalverlust du verkraftest.
@@ -29,6 +30,18 @@ Die Logik ist ein 1:1-Port des Python-Bots (Kennzahlen stimmen in den Tests auf 
 3. Optionen → **LIVE-Modus** einschalten (Bestätigung durch Eintippen von LIVE), `Kapital` = max. einzusetzendes USDC.
 4. Popup → Wallet **entsperren** → **Bot starten**.
 
+## Mehrere Märkte gleichzeitig
+- Jeder Markt wird **einzeln** analysiert und gebacktestet; eine Strategie wird je Markt zugelassen oder abgelehnt
+  (Tab „Strategien“ zeigt die Spalte „Markt“). Höchstens `maxOpenPositions` Positionen gleichzeitig (Standard 2) – das Limit,
+  das Tagesverlust-Limit und das Risiko pro Trade (1 %) gelten über alle Märkte zusammen. Fällt die Datenquelle eines
+  Marktes aus, laufen die anderen weiter.
+- **BTC und ETH auf Solana sind Wrapped-Token (Wormhole)** mit deutlich dünnerer Liquidität als SOL: mehr Slippage,
+  größere Abweichung vom Börsenkurs. Die Token-Adressen stammen aus meinem Gedächtnis und sind **nicht verifiziert** –
+  prüfe sie in den Optionen gegen einen Solana-Explorer (dort auch überschreibbar). Schutz: Nachkommastellen werden von der Chain gelesen, und
+  jeder Swap bricht ab, wenn der Jupiter-Preis um mehr als 1 % vom Börsenkurs abweicht (das fängt auch eine falsche Adresse ab).
+  Wenn BTC/ETH häufig an diesem Abgleich scheitern, schalte sie ab und handle nur SOL.
+- Beobachtet werden die Märkte über Kraken-Kurse in USD, gehandelt wird gegen USDC (1 USDC ≈ 1 USD).
+
 ## Was du wissen musst (ehrlich)
 - **Der Browser muss laufen.** Die Extension handelt nur, solange Chrome läuft und der Rechner nicht schläft. Chrome kann
   im Hintergrund weiterlaufen (Einstellung „Hintergrund-Apps weiter ausführen“), ist aber kein Server. Für echten
@@ -53,7 +66,7 @@ Die Logik ist ein 1:1-Port des Python-Bots (Kennzahlen stimmen in den Tests auf 
 
 ## Entwicklung / Tests
 ```bash
-node --test extension/test/*.test.mjs                       # 16 Tests (Node 20+)
+node --test extension/test/*.test.mjs                       # 23 Tests (Node 20+)
 python extension/test/make_parity_fixture.py                # Python-Referenzwerte neu erzeugen
 python extension/test/make_sign_fixture.py                  # Signatur-Referenz (solders) neu erzeugen
 ```

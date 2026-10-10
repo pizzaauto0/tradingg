@@ -4,6 +4,9 @@ const form = document.getElementById("form"), errorBox = document.getElementById
 // [Pfad, Beschriftung, Typ, Hinweis]
 const SECTIONS = [
   ["Handel", [
+    ["assets.SOL", "SOL handeln", "asset"],
+    ["assets.BTC", "BTC handeln (Wrapped-Token auf Solana, dünnere Liquidität)", "asset"],
+    ["assets.ETH", "ETH handeln (Wrapped-Token auf Solana, dünnere Liquidität)", "asset"],
     ["timeframe", "Zeitrahmen", ["5m", "15m", "30m", "1h"]],
     ["capital.start", "Kapital (USD/USDC)", "number", "Paper: Startguthaben. Live: maximal eingesetztes USDC."],
   ]],
@@ -33,6 +36,8 @@ const SECTIONS = [
   ["Solana / Jupiter", [
     ["solana.rpcUrl", "RPC-URL", "text", "Für Dauerbetrieb eigenen RPC-Anbieter eintragen (Helius, QuickNode, …)."],
     ["solana.jupiterUrl", "Jupiter-API-URL", "text"],
+    ["solana.mints.BTC", "Token-Adresse BTC (leer = Standard, selbst prüfen!)", "text", "Gegen einen Solana-Explorer prüfen. Falsche Adressen fängt der Preisabgleich ab, aber prüfe sie trotzdem."],
+    ["solana.mints.ETH", "Token-Adresse ETH (leer = Standard, selbst prüfen!)", "text"],
     ["solana.solReserve", "SOL-Reserve für Gebühren", "number"],
     ["solana.slippageBps", "Max. Slippage (Basispunkte)", "number"],
     ["solana.maxDeviationPct", "Abbruch bei Preisabweichung (%)", "number"],
@@ -76,10 +81,12 @@ async function build() {
     for (const [path, label, type, hint] of fields) {
       let input;
       if (Array.isArray(type)) { input = h("select", {}, ...type.map((o) => h("option", { value: o }, o))); input.value = get(cfg, path); }
+      else if (type === "asset") { input = h("input", { type: "checkbox" }); input.checked = cfg.assets.includes(path.split(".")[1]); }
       else if (type === "bool") { input = h("input", { type: "checkbox" }); input.checked = !!get(cfg, path); }
       else { input = h("input", { type: type === "number" ? "number" : type, step: "any" }); input.value = get(cfg, path) === "***" ? "" : get(cfg, path) ?? ""; if (get(cfg, path) === "***") input.placeholder = "(gespeichert – leer lassen zum Behalten)"; }
       inputs.push({ path, type, input });
-      form.append(h("label", { class: type === "bool" ? "check" : "" }, type === "bool" ? [input, label] : [label, input]));
+      const isCheck = type === "bool" || type === "asset";
+      form.append(h("label", { class: isCheck ? "check" : "" }, isCheck ? [input, label] : [label, input]));
       if (hint) form.append(h("div", { class: "hint" }, hint));
     }
   }
@@ -90,12 +97,16 @@ async function build() {
     errorBox.hidden = true;
     try {
       const patch = {};
+      const assets = [];
       for (const { path, type, input } of inputs) {
+        if (type === "asset") { if (input.checked) assets.push(path.split(".")[1]); continue; }
         let v = type === "bool" ? input.checked : type === "number" ? Number(input.value) : input.value.trim();
         if (type === "password" && v === "") continue; // gespeicherten Wert behalten
         setPath(patch, path, v);
       }
       patch.liveTrading = live.checked;
+      if (!assets.length) throw new Error("Mindestens ein Markt muss aktiv sein.");
+      patch.assets = assets;
       if (live.checked && !cfg.liveTrading && prompt('LIVE-Modus aktivieren? Es werden echte Orders mit echtem Geld platziert.\nZur Bestätigung LIVE eintippen:') !== "LIVE") {
         throw new Error("Live-Modus nicht aktiviert (Bestätigung fehlt).");
       }

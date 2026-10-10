@@ -37,7 +37,7 @@ const ago = (iso) => (iso ? `${Math.round((Date.now() - Date.parse(iso)) / 60000
 const mmss = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
 
 function activityCard() {
-  const { state } = status, a = state.activity, secs = state.lastTick ? (Date.now() - Date.parse(state.lastTick)) / 1000 : null;
+  const { state } = status, secs = state.lastTick ? (Date.now() - Date.parse(state.lastTick)) / 1000 : null;
   const alive = state.enabled && secs != null && secs < 120;
   const dot = h("span", { class: `dot ${alive ? "alive" : state.enabled ? "stale" : "off"}` });
   const failing = state.enabled && state.lastError && !alive;
@@ -46,12 +46,18 @@ function activityCard() {
     : secs == null ? "Wartet auf den ersten Durchlauf (alle 30 s) …" : alive ? "Bot arbeitet" : "Kein Lebenszeichen – ist der Browser aktiv?";
   const lines = [h("div", { class: "headline" }, dot, headline)];
   if (state.enabled && secs != null) lines.push(row("Letzte Prüfung", `vor ${Math.round(secs)} s`));
-  if (a) {
-    lines.push(row("SOL-Kurs", a.price != null ? `${fmt(a.price)} USD` : "–"),
-      row("Marktphase", a.regime ? `${a.regime} · Vol. ${a.volatility} · ADX ${fmt(a.adx, 0)}` : (a.note || "–")),
-      row("Gewählte Strategie", a.strategy ?? "keine passende zugelassen", a.strategy ? "" : "muted"),
-      row("Einstiegssignal", a.signal == null ? "–" : a.signal ? "JA (wird bei Kerzenschluss geprüft)" : "nein", a.signal ? "ok" : ""),
-      row("Nächste Kerzenprüfung in", h("span", { id: "countdown", "data-t": a.nextCandleAt }, mmss(a.nextCandleAt - Date.now()))));
+  const syms = Object.keys(state.activity);
+  if (syms.length) {
+    lines.push(h("table", {}, h("thead", {}, h("tr", {}, ...["Markt", "Kurs", "Phase", "Strategie", "Signal"].map((t) => h("th", {}, t)))),
+      h("tbody", {}, ...syms.map((sym) => {
+        const a = state.activity[sym];
+        if (a.error) return h("tr", {}, h("td", {}, sym), h("td", { colspan: 4, class: "bad" }, `Daten nicht ladbar: ${a.error}`));
+        return h("tr", {}, h("td", {}, sym.split("/")[0]), h("td", {}, fmt(a.price, a.price > 1000 ? 0 : 2)),
+          h("td", {}, a.regime ?? "–"), h("td", { class: a.strategy ? "" : "muted" }, a.strategy ? a.strategy.split("(")[0] : "keine"),
+          h("td", { class: a.signal ? "ok" : "" }, a.signal == null ? "–" : a.signal ? "JA" : "nein"));
+      }))));
+    const next = Math.min(...syms.map((s) => state.activity[s].nextCandleAt).filter(Boolean));
+    if (Number.isFinite(next)) lines.push(row("Nächste Kerzenprüfung in", h("span", { id: "countdown", "data-t": next }, mmss(next - Date.now()))));
   }
   if (state.enabled && state.report.length && !state.approved.length && !state.status) lines.push(h("div", { class: "hint" }, "Keine Strategie hat den Backtest bestanden – der Bot wartet und prüft täglich neu."));
   if (status.state.decisions?.length) lines.push(h("div", { class: "decisions" }, ...status.state.decisions.map((d) =>
@@ -64,7 +70,7 @@ setInterval(() => { const c = document.getElementById("countdown"); if (c) c.tex
 
 // ---------------------------------------------------------------- Status
 function renderStatus() {
-  const { cfg, state, vault } = status, live = cfg.liveTrading, pos = Object.values(state.positions)[0];
+  const { cfg, state, vault } = status, live = cfg.liveTrading, positions = Object.values(state.positions);
   const out = [];
   if (state.pending) out.push(h("div", { class: "error" }, `Unklarer Orderstatus (${state.pending.what}). Bot gestoppt – Wallet prüfen, dann bestätigen. `,
     btn("Geprüft, zurücksetzen", () => act(() => call("clearPending")))));
@@ -87,11 +93,11 @@ function renderStatus() {
     h("div", { class: "btns" }, btn("NOT-AUS: Position schließen & stoppen", () => act(() => call("kill")), "danger")),
   ));
 
-  out.push(card("Position",
-    pos ? [row("Menge", `${fmt(pos.amount, 4)} SOL`), row("Einstieg", fmt(pos.entryPrice)), row("Stop-Loss", fmt(pos.stop), "bad"),
-      row("Ziel", fmt(pos.takeProfit), "ok"), row("Strategie", pos.strategyName), row("Marktphase", pos.regime)]
-      : h("span", { class: "muted" }, "Keine offene Position."),
-  ));
+  out.push(card(`Positionen (${positions.length}/${cfg.risk.maxOpenPositions})`,
+    positions.length ? positions.map((pos) => h("div", { class: "pos" }, h("strong", {}, pos.symbol),
+      row("Menge / Einstieg", `${fmt(pos.amount, 5)} @ ${fmt(pos.entryPrice)}`), row("Stop-Loss / Ziel", `${fmt(pos.stop)} / ${fmt(pos.takeProfit)}`),
+      row("Strategie", `${pos.strategyName} (${pos.regime})`)))
+      : h("span", { class: "muted" }, "Keine offene Position.")));
 
   const daily = state.risk?.startEquity;
   out.push(card("Konto & Risiko",
@@ -113,9 +119,9 @@ function renderStrategies() {
   const rows = [...report].sort((a, b) => (b.approved - a.approved) || (b.metrics.sharpe - a.metrics.sharpe));
   return [
     h("p", { class: "muted" }, `${approved.length} von ${report.length} zugelassen. Mindestwerte in den Einstellungen.`),
-    h("table", {}, h("thead", {}, h("tr", {}, ...["Strategie", "Rend.%", "DD%", "Sharpe", "Treffer%", "n"].map((t) => h("th", {}, t)))),
+    h("table", {}, h("thead", {}, h("tr", {}, ...["Markt", "Strategie", "Rend.%", "DD%", "Sharpe", "Tr.%", "n"].map((t) => h("th", {}, t)))),
       h("tbody", {}, ...rows.map((r) => h("tr", { title: r.failures.join("; ") },
-        h("td", { class: r.approved ? "ok" : "muted" }, (r.approved ? "✔ " : "✘ ") + r.strategy + (r.source === "llm" ? " (LLM)" : "")),
+        h("td", {}, (r.symbol || "").split("/")[0]), h("td", { class: r.approved ? "ok" : "muted" }, (r.approved ? "✔ " : "✘ ") + r.strategy + (r.source === "llm" ? " (LLM)" : "")),
         h("td", {}, fmt(r.metrics.return_pct)), h("td", {}, fmt(r.metrics.max_drawdown_pct)), h("td", {}, fmt(r.metrics.sharpe)),
         h("td", {}, fmt(r.metrics.win_rate_pct, 0)), h("td", {}, r.metrics.trades))))),
     h("p", { class: "hint" }, "Mauszeiger über eine Zeile zeigt, warum eine Strategie abgelehnt wurde."),
@@ -126,7 +132,7 @@ function renderStrategies() {
 function renderTrades() {
   if (!status.trades.length) return [h("p", { class: "muted" }, "Noch keine Trades.")];
   return status.trades.map((t) => h("div", { class: "card" },
-    row(`${t.action} · ${t.mode}`, new Date(t.ts).toLocaleString()),
+    row(`${t.action} ${(t.symbol || "").split("/")[0]} · ${t.mode}`, new Date(t.ts).toLocaleString()),
     row("Preis / Menge", `${fmt(t.price)} / ${fmt(t.amount, 4)}`),
     t.pnl != null && row("Ergebnis (netto)", `${t.pnl >= 0 ? "+" : ""}${fmt(t.pnl)} USD`, t.pnl >= 0 ? "ok" : "bad"),
     h("div", { class: "muted" }, t.reason)));
