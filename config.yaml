@@ -1,0 +1,72 @@
+# ===================================================================
+#  Trading-Bot – Konfiguration
+#  Standard ist PAPER-Trading (Spielgeld, es werden keine echten Orders gesendet).
+# ===================================================================
+
+# Das EINZIGE Flag, das echte Orders freischaltet. Standard: false.
+# Live zusätzlich nur mit gesetzten API-Keys (siehe exchange.*_env).
+live_trading: false
+
+exchange:
+  id: kraken                         # beliebiger ccxt-Börsenname
+  api_key_env: EXCHANGE_API_KEY      # Name der Umgebungsvariable (Keys NIE in die Datei schreiben)
+  api_secret_env: EXCHANGE_API_SECRET
+
+market:
+  symbols: ["BTC/USD", "ETH/USD"]    # alle mit derselben Quote-Währung
+  timeframe: 15m                     # Daytrading auf 15-Minuten-Kerzen
+  history_candles: 3000              # ca. 31 Tage bei 15m, für Backtests
+  # Kraken liefert über die API nur die letzten 720 Kerzen. Für tiefere Historie
+  # kommt sie von dieser Börse (gleiche Symbole). Leer lassen = Hauptbörse.
+  history_exchange: bitstamp
+  live_lookback: 300                 # Kerzen, die pro Durchlauf geladen werden
+  poll_seconds: 20                   # Abfrageintervall der Hauptschleife
+
+capital:
+  start: 1000                        # Paper: Startguthaben. Live: maximales Kapital, das der Bot einsetzt.
+
+# ---------------- Risikomanagement (hat Vorrang vor allem anderen) ----------------
+risk:
+  risk_per_trade_pct: 1.0            # max. Verlust pro Trade in % des Kapitals (erlaubt: 0 < x <= 2)
+  max_daily_loss_pct: 5.0            # danach Handelsstopp bis zum nächsten UTC-Tag
+  close_positions_on_daily_limit: true
+  max_open_positions: 2
+  max_position_pct: 50.0             # max. Positionsgröße in % des Kapitals
+  atr_period: 14
+  atr_stop_mult: 2.0                 # Stop-Loss = Einstieg - mult * ATR
+  take_profit_rr: 2.0                # Take-Profit = Risiko * rr
+  kill_switch_file: KILL_SWITCH      # existiert diese Datei -> alles schließen, Bot beenden
+
+costs:
+  fee_pct: 0.26                      # Taker-Gebühr je Order (Kraken-Standard)
+  slippage_pct: 0.05                 # angenommene Slippage je Order
+
+# ---------------- Backtest-Mindestwerte (Zulassung einer Strategie) ----------------
+backtest:
+  min_candles: 1000
+  min_trades: 20
+  min_return_pct: 2.0
+  max_drawdown_pct: 15.0
+  min_sharpe: 1.0
+  min_win_rate_pct: 35.0
+  min_profit_factor: 1.2
+  oos_fraction: 0.3                  # letzter Teil der Historie als "Out-of-Sample"-Prüfung
+  min_oos_return_pct: 0.0
+
+# ---------------- Strategie-Pipeline ----------------
+pipeline:
+  revalidate_hours: 24               # Recherche + Backtest wiederholen und Zulassungen erneuern
+
+llm:
+  enabled: false                     # true + ANTHROPIC_API_KEY -> Strategie-Vorschläge per LLM
+  model: claude-sonnet-5-5
+  api_key_env: ANTHROPIC_API_KEY
+  max_tokens: 4000
+
+telegram:
+  enabled: false
+  token_env: TELEGRAM_BOT_TOKEN
+  chat_id_env: TELEGRAM_CHAT_ID
+
+paths:
+  data_dir: data                     # Logs, SQLite-DB, Zustand, Strategie-Dateien

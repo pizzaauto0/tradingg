@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.env
+data/
+KILL_SWITCH
+.pytest_cache/
+.venv/

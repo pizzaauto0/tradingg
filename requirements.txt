@@ -1,0 +1,7 @@
+ccxt>=4.4
+pandas>=2.2
+numpy>=1.26
+PyYAML>=6.0
+requests>=2.31
+anthropic>=0.40      # nur für das LLM-Recherche-Modul (optional)
+pytest>=8.0          # nur für die Tests
