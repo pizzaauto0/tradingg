@@ -123,3 +123,15 @@ def test_keyring_fallback(monkeypatch):
     cfg = Config(broker="solana"); cfg.market.symbols = ["SOL/USD"]
     assert sb.SolanaBroker(cfg.validate(), session=object()).owner == str(k.pubkey())
     assert cfg.live_credentials()[0] == str(k)
+
+
+def test_new_wallet_command(monkeypatch, capsys):
+    import main as cli
+    import tradingbot.solana_broker as sb
+    store = {}
+    monkeypatch.setattr(sb, "keyring_get", lambda: store.get("k", ""))
+    monkeypatch.setattr(sb, "keyring_set", lambda v: store.__setitem__("k", v))
+    assert cli.cmd_new_wallet(None, show_key=False) == 0
+    out = capsys.readouterr().out
+    assert sb.load_keypair(store["k"]).pubkey().__str__() in out and store["k"] not in out
+    assert cli.cmd_new_wallet(None, show_key=True) == 2          # überschreibt nie einen vorhandenen Schlüssel

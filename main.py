@@ -139,6 +139,27 @@ def cmd_set_key(cfg) -> int:
     return 0
 
 
+def cmd_new_wallet(cfg, show_key: bool) -> int:
+    from solders.keypair import Keypair
+
+    from tradingbot.solana_broker import keyring_get, keyring_set
+
+    if keyring_get():
+        print("Im Schlüsselbund liegt bereits ein Schlüssel – nichts überschrieben.")
+        print("Zum Ersetzen zuerst den alten sichern, dann 'python main.py set-key' nutzen.")
+        return 2
+    kp = Keypair()
+    keyring_set(str(kp))
+    print(f"Neue Bot-Wallet erzeugt und im Schlüsselbund gespeichert.\nAdresse (öffentlich): {kp.pubkey()}")
+    print("Sende USDC und ca. 0,1 SOL an diese Adresse (z. B. aus Phantom) – nur Beträge, deren Verlust du verkraftest.")
+    if show_key:
+        print(f"\nBACKUP des privaten Schlüssels (nur offline sichern, niemandem zeigen):\n{kp}")
+    else:
+        print("Backup: 'python main.py new-wallet --show-key' zeigt den Schlüssel nur bei der Erzeugung. "
+              "Ohne Backup ist das Geld bei Verlust des Schlüsselbunds weg.")
+    return 0
+
+
 def cmd_kill(cfg) -> int:
     path = Path(cfg.risk.kill_switch_file)
     path.write_text(f"Kill Switch ausgelöst {utcnow().isoformat()}\n")
@@ -157,6 +178,8 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--once", action="store_true", help="nur einen Durchlauf ausführen")
     sub.add_parser("status")
     sub.add_parser("kill")
+    nw = sub.add_parser("new-wallet", help="Neue Solana-Bot-Wallet erzeugen (Schlüssel landet im Schlüsselbund)")
+    nw.add_argument("--show-key", action="store_true", help="Schlüssel einmalig als Backup anzeigen")
     sub.add_parser("set-key", help="Solana-Schlüssel sicher im Schlüsselbund ablegen")
     args = parser.parse_args(argv)
 
@@ -175,6 +198,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_run(cfg, args.once)
         if args.cmd == "status":
             return cmd_status(cfg)
+        if args.cmd == "new-wallet":
+            return cmd_new_wallet(cfg, args.show_key)
         if args.cmd == "set-key":
             return cmd_set_key(cfg)
         return cmd_kill(cfg)

@@ -120,6 +120,10 @@ Signale kommen weiter aus Börsendaten (SOL/USD), nur die Ausführung läuft auf
 - Ein Swap kann bestätigt werden, nachdem der Bot das Zeitlimit meldet. Bei der Meldung „Status unklar“ die Wallet prüfen.
 - Jupiters API-URL/Konditionen können sich ändern (`jupiter_url` in der Config) – gegen die aktuelle Doku prüfen.
 
+### Neue Bot-Wallet erzeugen (empfohlen – kein Export aus Phantom nötig)
+`python main.py new-wallet --show-key` erzeugt ein frisches Schlüsselpaar, legt es im Schlüsselbund ab und zeigt die öffentliche
+Adresse (und einmalig den Schlüssel als Offline-Backup). Dann USDC und ca. 0,1 SOL aus Phantom an diese Adresse senden.
+
 ### Schlüssel sicher ablegen (statt `.env`)
 `python main.py set-key` fragt den privaten Schlüssel der Bot-Wallet unsichtbar ab und speichert ihn im
 Betriebssystem-Schlüsselbund (macOS Keychain, Windows Credential Manager, Linux Secret Service). Der Bot nutzt ihn
