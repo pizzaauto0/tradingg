@@ -48,7 +48,7 @@ def cfg_path(tmp_path, monkeypatch):
 def test_research_run_status_kill(cfg_path, capsys):
     assert cli.main(["--config", cfg_path, "research"]) == 0
     out = capsys.readouterr().out
-    assert "ZUGELASSEN" in out and "Sharpe" in out
+    assert "AKTIV" in out and "Sharpe" in out
     assert cli.main(["--config", cfg_path, "run", "--once"]) == 0
     assert cli.main(["--config", cfg_path, "status"]) == 0
     assert "PAPER" in capsys.readouterr().out

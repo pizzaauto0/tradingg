@@ -18,7 +18,7 @@ from typing import Any, Optional
 import requests
 
 from .config import Config
-from .execution import Fill, InsufficientFunds, Position
+from .execution import Fill, InsufficientFunds, Position, SpotLongOnly
 
 log = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ def load_keypair(secret: str):
     return Keypair.from_base58_string(secret)
 
 
-class SolanaBroker:
+class SolanaBroker(SpotLongOnly):
     mode = "live"
 
     def __init__(self, cfg: Config, session: Any = None, keypair: Any = None):

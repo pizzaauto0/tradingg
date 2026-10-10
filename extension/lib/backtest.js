@@ -14,6 +14,9 @@ export function runBacktest(cfg, df, strategy, initial = cfg.capital.start) {
   const entrySig = strategy.entry(df), exitSig = strategy.exit(df);
   const regimeOk = regimeSeries(df).map((r) => strategy.regimes.includes(r));
   const atrArr = atr(df, cfg.risk.atrPeriod);
+  // strategieeigene Ausstiegsabstände (stop_mult, rr) überschreiben die globalen Werte
+  const risk = { ...cfg.risk, atrStopMult: strategy.stopMult?.(cfg.risk.atrStopMult) ?? cfg.risk.atrStopMult,
+    takeProfitRr: strategy.rr?.(cfg.risk.takeProfitRr) ?? cfg.risk.takeProfitRr };
   const { open: o, high: h, low: l, close: c } = df;
 
   let cash = initial, amount = 0, entryPx = 0, stop = 0, tp = 0, costBasis = 0, entryI = 0;
@@ -31,7 +34,7 @@ export function runBacktest(cfg, df, strategy, initial = cfg.capital.start) {
       closePosition(i, o[i] * (1 - slip), "signal");
     } else if (amount === 0 && entrySig[i - 1] && regimeOk[i - 1] && Number.isFinite(atrArr[i - 1])) {
       const px = o[i] * (1 + slip);
-      const [stop_, tp_] = stopAndTarget(px, atrArr[i - 1], cfg.risk);
+      const [stop_, tp_] = stopAndTarget(px, atrArr[i - 1], risk);
       const size = stop_ > 0 ? positionSize(cash, cash, px, stop_, cfg.risk, cfg.costs) : 0;
       if (size > 0) {
         amount = size; entryPx = px; stop = stop_; tp = tp_; entryI = i;

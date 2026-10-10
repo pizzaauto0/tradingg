@@ -193,7 +193,8 @@ export class Engine {
     const { strategy } = sel;
 
     const price = last(live.close), atrValue = last(atr(closed, this.cfg.risk.atrPeriod));
-    const [stop, takeProfit] = stopAndTarget(price, atrValue, this.cfg.risk);
+    const risk = { ...this.cfg.risk, atrStopMult: strategy.stopMult(this.cfg.risk.atrStopMult), takeProfitRr: strategy.rr(this.cfg.risk.takeProfitRr) };
+    const [stop, takeProfit] = stopAndTarget(price, atrValue, risk);
     if (stop <= 0) { console.warn(`${sym}: ATR unbrauchbar, kein Einstieg`); return; }
     const equity = await this.equity();
     const raw = positionSize(this.risk.sizingEquity(equity), await this.broker.cash(), price, stop, this.cfg.risk, this.cfg.costs);
@@ -202,8 +203,8 @@ export class Engine {
 
     const riskCash = amount * (price - stop);
     const reason = `${strategy.explain(closed)}; Marktphase: ${summarize(market)}; Stop ${stop.toFixed(2)} ` +
-      `(${this.cfg.risk.atrStopMult}x ATR), Ziel ${takeProfit.toFixed(2)}; Risiko ca. ${riskCash.toFixed(2)} ` +
-      `(${((riskCash / equity) * 100).toFixed(2)}% des Kapitals); Backtest-Sharpe ${(sel.record.metrics?.sharpe ?? 0).toFixed(2)}`;
+      `(${risk.atrStopMult}x ATR), Ziel ${takeProfit.toFixed(2)}; Risiko ca. ${riskCash.toFixed(2)} ` +
+      `(${((riskCash / equity) * 100).toFixed(2)}% des Kapitals); Backtest: Sharpe ${(sel.record.metrics?.sharpe ?? 0).toFixed(2)}, Trefferquote ${(sel.record.metrics?.win_rate_pct ?? 0).toFixed(1)}%`;
 
     this.state.pending = { what: `Kauf ${sym}`, ts: now.toISOString() };
     await this.save();
@@ -232,7 +233,7 @@ export class Engine {
       const res = await this.refresher();
       this.state.approved = res.approved;
       this.state.report = res.report;
-      await this.notify(`Strategien neu geprüft: ${res.approved.length} zugelassen${res.problems?.length ? ` (Probleme: ${res.problems.join("; ")})` : ""}`);
+      await this.notify(`Strategien neu geprüft: ${res.approved.length} zugelassen, ${res.approved.filter((a) => a.active).length} aktiv${res.problems?.length ? ` (Probleme: ${res.problems.join("; ")})` : ""}`);
     } catch (e) {
       await this.notify(`Neuprüfung der Strategien fehlgeschlagen: ${e.message}`);
     }

@@ -37,6 +37,16 @@ class SolanaCfg:
 
 
 @dataclass
+class IbkrCfg:
+    """Interactive Brokers (Forex). TWS oder IB Gateway muss laufen und eingeloggt sein."""
+    host: str = "127.0.0.1"
+    port: int = 4002                      # IB Gateway: 4002 Paper / 4001 Live; TWS: 7497 Paper / 7496 Live
+    client_id: int = 17
+    account: str = ""                     # leer = erstes Konto der Anmeldung
+    account_type: str = "paper"           # paper | live – bei "paper" verweigert der Bot echte Konten (nicht "DU…")
+
+
+@dataclass
 class MarketCfg:
     symbols: list[str] = field(default_factory=lambda: ["BTC/USD", "ETH/USD"])
     timeframe: str = "15m"
@@ -44,6 +54,7 @@ class MarketCfg:
     history_exchange: str = ""
     live_lookback: int = 300
     poll_seconds: int = 20
+    allow_short: bool = False             # Leerverkäufe (nur broker: ibkr / Forex)
 
 
 @dataclass
@@ -77,7 +88,7 @@ class BacktestCfg:
     min_return_pct: float = 2.0
     max_drawdown_pct: float = 15.0
     min_sharpe: float = 1.0
-    min_win_rate_pct: float = 35.0
+    min_win_rate_pct: float = 55.0
     min_profit_factor: float = 1.2
     oos_fraction: float = 0.3
     min_oos_return_pct: float = 0.0
@@ -86,6 +97,7 @@ class BacktestCfg:
 @dataclass
 class PipelineCfg:
     revalidate_hours: float = 24.0
+    max_active_strategies: int = 5        # nur die besten N zugelassenen Strategien handeln aktiv
 
 
 @dataclass
@@ -111,9 +123,10 @@ class PathsCfg:
 @dataclass
 class Config:
     live_trading: bool = False
-    broker: str = "ccxt"                  # ccxt (Börse) | solana (Wallet über Jupiter)
+    broker: str = "ccxt"                  # ccxt (Krypto-Börse) | solana (Wallet über Jupiter) | ibkr (Forex)
     exchange: ExchangeCfg = field(default_factory=ExchangeCfg)
     solana: SolanaCfg = field(default_factory=SolanaCfg)
+    ibkr: IbkrCfg = field(default_factory=IbkrCfg)
     market: MarketCfg = field(default_factory=MarketCfg)
     capital: CapitalCfg = field(default_factory=CapitalCfg)
     risk: RiskCfg = field(default_factory=RiskCfg)
@@ -130,6 +143,11 @@ class Config:
         return "live" if self.live_trading else "paper"
 
     @property
+    def is_margin(self) -> bool:
+        """Margin-Konto (Forex über IBKR): Long und Short, Gewinn/Verlust statt Kauf mit Bargeld."""
+        return self.broker == "ibkr"
+
+    @property
     def quote(self) -> str:
         return self.market.symbols[0].split("/")[1]
 
@@ -142,6 +160,8 @@ class Config:
         return Path(self.paths.data_dir)
 
     def live_credentials(self) -> tuple[str, str]:
+        if self.broker == "ibkr":
+            return "", ""  # Anmeldung erfolgt in TWS / IB Gateway, nicht über den Bot
         if self.broker == "solana":
             from .solana_broker import keyring_get
 
@@ -163,8 +183,17 @@ class Config:
         e = ConfigError
         if not isinstance(self.live_trading, bool):
             raise e("live_trading muss true oder false sein.")
-        if self.broker not in ("ccxt", "solana"):
-            raise e("broker muss 'ccxt' oder 'solana' sein.")
+        if self.broker not in ("ccxt", "solana", "ibkr"):
+            raise e("broker muss 'ccxt', 'solana' oder 'ibkr' sein.")
+        if self.market.allow_short and not self.is_margin:
+            raise e("market.allow_short ist nur mit broker 'ibkr' (Forex) möglich – Spot-Krypto wird nur gekauft.")
+        if self.broker == "ibkr":
+            if any(len(p) != 3 or not p.isalpha() for sym in self.market.symbols for p in sym.split("/")):
+                raise e("broker 'ibkr': Symbole als Währungspaare angeben, z. B. EUR/USD.")
+            if self.ibkr.account_type not in ("paper", "live"):
+                raise e("ibkr.account_type muss 'paper' oder 'live' sein.")
+        if self.pipeline.max_active_strategies < 1:
+            raise e("pipeline.max_active_strategies muss >= 1 sein.")
         if not self.market.symbols:
             raise e("market.symbols darf nicht leer sein.")
         if self.broker == "solana" and any(sym.split("/")[0] != "SOL" for sym in self.market.symbols):
@@ -190,8 +219,9 @@ class Config:
             raise e("risk.max_daily_loss_pct muss in (0, 100] liegen.")
         if r.max_open_positions < 1:
             raise e("risk.max_open_positions muss >= 1 sein.")
-        if not 0 < r.max_position_pct <= 100:
-            raise e("risk.max_position_pct muss in (0, 100] liegen.")
+        max_pos = 3000 if self.is_margin else 100  # Forex: Hebel bis 30:1 (ESMA-Grenze für Majors), sonst kein Hebel
+        if not 0 < r.max_position_pct <= max_pos:
+            raise e(f"risk.max_position_pct muss in (0, {max_pos}] liegen.")
         if r.atr_period < 2 or r.atr_stop_mult <= 0 or r.take_profit_rr <= 0:
             raise e("risk.atr_period >= 2, atr_stop_mult > 0 und take_profit_rr > 0 erforderlich.")
         if self.costs.fee_pct < 0 or self.costs.slippage_pct < 0:

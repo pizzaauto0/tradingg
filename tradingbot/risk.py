@@ -7,27 +7,32 @@ from pathlib import Path
 from .config import Config, CostsCfg, RiskCfg
 
 
-def stop_and_target(entry: float, atr_value: float, risk: RiskCfg) -> tuple[float, float]:
-    """Stop-Loss und Take-Profit aus ATR. Gibt (0, 0) zurück, wenn ATR unbrauchbar ist."""
-    dist = atr_value * risk.atr_stop_mult
-    if not dist > 0 or entry - dist <= 0:
+def stop_and_target(entry: float, atr_value: float, risk: RiskCfg, side: int = 1,
+                    stop_mult: float | None = None, rr: float | None = None) -> tuple[float, float]:
+    """Stop-Loss und Take-Profit aus ATR (side 1 = long, -1 = short). (0, 0), wenn ATR unbrauchbar ist.
+    stop_mult/rr überschreiben die globalen Werte (strategieeigene Ausstiegsabstände)."""
+    dist = atr_value * (risk.atr_stop_mult if stop_mult is None else stop_mult)
+    rr = risk.take_profit_rr if rr is None else rr
+    if not dist > 0 or (side == 1 and entry - dist <= 0):
         return 0.0, 0.0
-    return entry - dist, entry + dist * risk.take_profit_rr
+    return entry - side * dist, entry + side * dist * rr
 
 
 def position_size(equity: float, cash: float, entry: float, stop: float,
-                  risk: RiskCfg, costs: CostsCfg) -> float:
+                  risk: RiskCfg, costs: CostsCfg, side: int = 1, margin: bool = False) -> float:
     """Positionsgröße so, dass ein Stop-Out inkl. Gebühren/Slippage höchstens
-    risk_per_trade_pct des Kapitals kostet; zusätzlich begrenzt durch
-    max_position_pct und verfügbares Bargeld (kein Hebel)."""
-    if stop <= 0 or entry <= stop:
+    risk_per_trade_pct des Kapitals kostet; zusätzlich begrenzt durch max_position_pct
+    (Nominalwert in % des Kapitals) und – im Spot-Handel – durch das verfügbare Bargeld (kein Hebel).
+    Im Margin-Konto (Forex) gilt nur max_position_pct als Hebelgrenze."""
+    if stop <= 0 or (entry - stop) * side <= 0:
         return 0.0
     cost = (costs.fee_pct + costs.slippage_pct) / 100
-    per_unit_risk = (entry - stop) + (entry + stop) * cost
+    per_unit_risk = abs(entry - stop) + (entry + stop) * cost
     amount = equity * risk.risk_per_trade_pct / 100 / per_unit_risk
     amount = min(amount, equity * risk.max_position_pct / 100 / entry)
-    # Kauf kostet entry * (1 + slippage) * (1 + fee) je Einheit (multiplikativ, nicht additiv)
-    amount = min(amount, cash / (entry * (1 + costs.slippage_pct / 100) * (1 + costs.fee_pct / 100)))
+    if not margin:
+        # Kauf kostet entry * (1 + slippage) * (1 + fee) je Einheit (multiplikativ, nicht additiv)
+        amount = min(amount, cash / (entry * (1 + costs.slippage_pct / 100) * (1 + costs.fee_pct / 100)))
     return max(amount, 0.0)
 
 

@@ -21,7 +21,7 @@ def select_strategy(approved: list[dict[str, Any]], symbol: str, timeframe: str,
     höchsten Backtest-Sharpe-Ratio, die zur aktuellen Marktphase passt."""
     best: Selection | None = None
     for rec in approved:
-        if rec.get("symbol") != symbol or rec.get("timeframe") != timeframe:
+        if rec.get("symbol") != symbol or rec.get("timeframe") != timeframe or not rec.get("active", True):
             continue
         try:
             strategy = build_strategy(rec["spec"])

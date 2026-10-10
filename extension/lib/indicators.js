@@ -75,7 +75,8 @@ export function bollinger(close, n = 20, k = 2.0) {
   return { lower: mid.map((m, i) => m - k * sd[i]), mid, upper: mid.map((m, i) => m + k * sd[i]) };
 }
 
-export function adx(df, n = 14) {
+// Directional Movement (Wilder): +DI, -DI und ADX
+export function dmi(df, n = 14) {
   const len = df.close.length, pdm = new Array(len).fill(0), mdm = new Array(len).fill(0);
   for (let i = 1; i < len; i++) {
     const up = df.high[i] - df.high[i - 1], down = -(df.low[i] - df.low[i - 1]);
@@ -83,12 +84,14 @@ export function adx(df, n = 14) {
     if (down > up && down > 0) mdm[i] = down;
   }
   const a = atr(df, n), pw = wilder(pdm, n), mw = wilder(mdm, n);
-  const dx = a.map((av, i) => {
-    const pdi = (100 * pw[i]) / av, mdi = (100 * mw[i]) / av, s = pdi + mdi;
-    return s === 0 ? NaN : (100 * Math.abs(pdi - mdi)) / s;
-  });
-  return wilder(dx, n);
+  const plus = pw.map((v, i) => (100 * v) / a[i]), minus = mw.map((v, i) => (100 * v) / a[i]);
+  const dx = plus.map((p, i) => { const s = p + minus[i]; return s === 0 ? NaN : (100 * Math.abs(p - minus[i])) / s; });
+  return { plus, minus, adx: wilder(dx, n) };
 }
+
+export const adx = (df, n = 14) => dmi(df, n).adx;
+
+export const rollSum = (x, n) => rolling(x, n, (w) => w.reduce((a, b) => a + b, 0));
 
 export function regimeSeries(df) {
   const fast = ema(df.close, EMA_FAST), slow = ema(df.close, EMA_SLOW), s = adx(df, ADX_PERIOD);

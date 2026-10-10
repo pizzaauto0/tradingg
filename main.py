@@ -19,7 +19,7 @@ from pathlib import Path
 from tradingbot.config import ConfigError, load_config
 from tradingbot.data import MarketData
 from tradingbot.engine import TradingEngine, load_state
-from tradingbot.execution import LiveBroker, PaperBroker
+from tradingbot.execution import LiveBroker, PaperBroker, PaperMarginBroker
 from tradingbot.notify import Notifier
 from tradingbot.pipeline import research_and_backtest
 from tradingbot.solana_broker import SolanaBroker
@@ -42,9 +42,18 @@ def load_env_file(path: str = ".env") -> None:
             os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
+def make_data(cfg):
+    """Marktdaten: Krypto über ccxt, Forex über Interactive Brokers (TWS/IB Gateway muss laufen)."""
+    if cfg.broker == "ibkr":
+        from tradingbot.ibkr import IBMarketData, connect
+
+        return IBMarketData(cfg, connect(cfg))
+    return MarketData(cfg)
+
+
 def cmd_research(cfg) -> int:
     store = StrategyStore(cfg.data_dir)
-    approved = research_and_backtest(cfg, MarketData(cfg), store)
+    approved = research_and_backtest(cfg, make_data(cfg), store)
     print(f"{len(approved)} zugelassene Strategie(n) gespeichert in {store.approved_path}")
     return 0 if approved else 1
 
@@ -57,16 +66,23 @@ def cmd_run(cfg, once: bool) -> int:
         print(f" Maximal eingesetztes Kapital: {cfg.capital.start} {cfg.quote}")
         if cfg.broker == "solana":
             print(" Broker: Solana/Jupiter – Stop-Loss wird vom Bot überwacht (keine Börsen-Stop-Order)!")
+        if cfg.broker == "ibkr":
+            print(f" Broker: Interactive Brokers ({cfg.ibkr.account_type.upper()}-Konto) – Forex mit Hebel, Long & Short.")
         print("=" * 70)
     else:
         print("PAPER-MODUS: simulierter Handel, es werden keine echten Orders gesendet.")
 
-    data = MarketData(cfg)
+    data = make_data(cfg)
     store = StrategyStore(cfg.data_dir)
     state_path = cfg.data_dir / "state_live.json" if cfg.live_trading else cfg.data_dir / "state_paper.json"
     state = load_state(state_path)
     if not cfg.live_trading:
-        broker = PaperBroker(cfg, state)
+        broker = PaperMarginBroker(cfg, state) if cfg.is_margin else PaperBroker(cfg, state)
+    elif cfg.broker == "ibkr":
+        from tradingbot.ibkr import IBKRBroker
+
+        broker = IBKRBroker(cfg, data.ib, data)
+        print(f" IB-Konto: {broker.account} ({broker.account_ccy}), Nettowert {broker.cash():.2f}")
     elif cfg.broker == "solana":
         broker = SolanaBroker(cfg)
         print(f" Bot-Wallet: {broker.owner}  (SOL: {broker.sol_balance():.4f}, USDC: {broker.usdc_balance():.2f})")
@@ -99,6 +115,21 @@ def cmd_run(cfg, once: bool) -> int:
         engine.tick()
         return 0
     engine.run_forever()
+    return 0
+
+
+def cmd_evaluate(cfg, csv_path: str, symbol: str) -> int:
+    """Alle Strategien gegen eigene historische Kursdaten (CSV) testen – ohne Börsenverbindung."""
+    from tradingbot.pipeline import backtest_candidates, load_csv, print_report
+    from tradingbot.strategies import default_candidates
+
+    df = load_csv(csv_path)
+    print(f"{len(df)} Kerzen {df.index[0]:%Y-%m-%d %H:%M} bis {df.index[-1]:%Y-%m-%d %H:%M} (Zeitrahmen laut Konfig: {cfg.market.timeframe})")
+    approved, report = backtest_candidates(cfg, default_candidates(), {symbol: df})
+    print_report(report)
+    n55 = sum(1 for r in report if r["metrics"]["win_rate_pct"] >= cfg.backtest.min_win_rate_pct)
+    print(f"{n55} von {len(report)} Varianten mit Trefferquote >= {cfg.backtest.min_win_rate_pct} %, "
+          f"{len(approved)} bestehen alle Mindestwerte, {sum(a['active'] for a in approved)} wären aktiv.")
     return 0
 
 
@@ -177,6 +208,9 @@ def main(argv: list[str] | None = None) -> int:
     run = sub.add_parser("run")
     run.add_argument("--once", action="store_true", help="nur einen Durchlauf ausführen")
     sub.add_parser("status")
+    ev = sub.add_parser("evaluate", help="Strategien gegen eine CSV-Datei mit Kursdaten testen")
+    ev.add_argument("csv", help="CSV: Zeit, Open, High, Low, Close[, Volume]")
+    ev.add_argument("--symbol", default="CSV", help="Name des Marktes in der Ausgabe")
     sub.add_parser("kill")
     nw = sub.add_parser("new-wallet", help="Neue Solana-Bot-Wallet erzeugen (Schlüssel landet im Schlüsselbund)")
     nw.add_argument("--show-key", action="store_true", help="Schlüssel einmalig als Backup anzeigen")
@@ -198,6 +232,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_run(cfg, args.once)
         if args.cmd == "status":
             return cmd_status(cfg)
+        if args.cmd == "evaluate":
+            return cmd_evaluate(cfg, args.csv, args.symbol)
         if args.cmd == "new-wallet":
             return cmd_new_wallet(cfg, args.show_key)
         if args.cmd == "set-key":

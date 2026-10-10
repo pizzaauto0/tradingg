@@ -27,3 +27,21 @@ test("Marktzustand stimmt mit Python überein", () => {
     assert.ok(Math.abs(s[js] - e[py]) < 1e-6 * Math.max(1, Math.abs(e[py])), `${js}: ${s[js]} vs ${e[py]}`);
   }
 });
+
+test("Strategieliste der Extension ist identisch mit der Python-Liste", async () => {
+  const { defaultCandidates, STRATEGY_TYPES } = await import("../lib/strategies.js");
+  const js = defaultCandidates().map(({ type, params, regimes }) => ({ type, params, regimes }));
+  assert.deepEqual(js, fx.backtests.map((b) => b.spec));
+  assert.ok(Object.keys(STRATEGY_TYPES).length >= 25);
+});
+
+test("Nur die 5 besten zugelassenen Strategien werden aktiv, je Typ und Markt höchstens eine", async () => {
+  const { markActive, selectStrategy } = await import("../lib/pipeline.js");
+  const rec = (symbol, type, sharpe) => ({ symbol, timeframe: "15m", name: `${type}-${sharpe}`, spec: { type, params: {} }, metrics: { sharpe, win_rate_pct: 60 } });
+  const approved = [rec("A", "x", 5), rec("A", "x", 4.9), rec("A", "y", 3), rec("B", "x", 2.5), rec("B", "z", 2), rec("C", "w", 1.5), rec("C", "v", 1)];
+  markActive(approved, 5);
+  assert.deepEqual(approved.filter((a) => a.active).map((a) => a.name), ["x-5", "y-3", "x-2.5", "z-2", "w-1.5"]);
+  const r = { symbol: "SOL/USD", timeframe: "15m", spec: { type: "ma_crossover", params: { fast: 9, slow: 21 } }, metrics: { sharpe: 3 } };
+  assert.equal(selectStrategy([{ ...r, active: false }], "SOL/USD", "15m", { regime: "uptrend" }), null);
+  assert.ok(selectStrategy([{ ...r, active: true }], "SOL/USD", "15m", { regime: "uptrend" }));
+});

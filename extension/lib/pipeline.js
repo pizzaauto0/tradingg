@@ -39,14 +39,29 @@ export async function researchAndBacktest(cfg, fetchFn = fetch, histories = null
       }
     }
   }
+  markActive(approved, cfg.pipeline.maxActiveStrategies);
+  const active = new Set(approved.filter((a) => a.active).map((a) => `${a.symbol}|${a.name}`));
+  for (const row of report) row.active = active.has(`${row.symbol}|${row.strategy}`);
   return { approved, report, problems, candles: Object.values(frames).map((f) => f.close.length), generatedAt: new Date().toISOString() };
 }
 
-// Wählt unter den zugelassenen Strategien des Symbols die mit dem höchsten Sharpe, die zur Marktphase passt.
+// Markiert die besten `limit` zugelassenen Strategien als aktiv (nach Sharpe, dann Trefferquote) –
+// höchstens eine Variante je Strategietyp und Markt. Die übrigen bleiben Reserve.
+export function markActive(approved, limit) {
+  const ranked = [...approved].sort((a, b) => b.metrics.sharpe - a.metrics.sharpe || b.metrics.win_rate_pct - a.metrics.win_rate_pct);
+  const seen = new Set();
+  for (const rec of ranked) {
+    const key = `${rec.symbol}|${rec.spec.type}`;
+    rec.active = seen.size < limit && !seen.has(key);
+    if (rec.active) seen.add(key);
+  }
+}
+
+// Wählt unter den aktiven Strategien des Symbols die mit dem höchsten Sharpe, die zur Marktphase passt.
 export function selectStrategy(approved, symbol, timeframe, state) {
   let best = null;
   for (const rec of approved) {
-    if (rec.symbol !== symbol || rec.timeframe !== timeframe) continue;
+    if (rec.symbol !== symbol || rec.timeframe !== timeframe || rec.active === false) continue;
     let strategy;
     try { strategy = buildStrategy(rec.spec); } catch { continue; }
     if (!strategy.regimes.includes(state.regime)) continue;

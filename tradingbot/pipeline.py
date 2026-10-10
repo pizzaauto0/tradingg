@@ -4,6 +4,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import pandas as pd
+
 from .analysis import MarketState, classify_market
 from .backtest import Backtester, check_thresholds
 from .config import Config
@@ -43,6 +45,17 @@ def research_and_backtest(cfg: Config, data: MarketData, store: StrategyStore) -
     store.save_candidates(candidates)
     log.info("%d Kandidaten, Backtest auf %d Symbol(en)", len(candidates), len(histories))
 
+    approved, report = backtest_candidates(cfg, candidates, histories)
+    store.save_approved(approved)
+    store.save_report(report)
+    print_report(report)
+    log.info("%d von %d Tests bestanden, %d aktiv", len(approved), len(report), sum(a["active"] for a in approved))
+    return approved
+
+
+def backtest_candidates(cfg: Config, candidates: list[dict[str, Any]],
+                        histories: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Testet jede Kandidaten-Strategie auf jedem Markt, prüft die Mindestwerte und markiert die besten als aktiv."""
     backtester = Backtester(cfg)
     approved: list[dict[str, Any]] = []
     report: list[dict[str, Any]] = []
@@ -55,27 +68,51 @@ def research_and_backtest(cfg: Config, data: MarketData, store: StrategyStore) -
         for symbol, df in histories.items():
             result = backtester.run(df, strategy, symbol)
             ok, failures = check_thresholds(result.metrics, cfg.backtest)
-            row = {"symbol": symbol, "timeframe": cfg.market.timeframe, "strategy": strategy.name,
-                   "source": spec.get("source", ""), "approved": ok, "failures": failures,
-                   "metrics": result.metrics}
-            report.append(row)
+            report.append({"symbol": symbol, "timeframe": cfg.market.timeframe, "strategy": strategy.name,
+                           "source": spec.get("source", ""), "approved": ok, "failures": failures,
+                           "metrics": result.metrics})
             if ok:
                 approved.append({"symbol": symbol, "timeframe": cfg.market.timeframe, "spec": strategy.to_spec(),
                                  "name": strategy.name, "source": spec.get("source", ""),
                                  "rationale": spec.get("rationale", ""), "metrics": result.metrics})
-    store.save_approved(approved)
-    store.save_report(report)
-    print_report(report)
-    log.info("%d von %d Tests bestanden", len(approved), len(report))
-    return approved
+    mark_active(approved, cfg.pipeline.max_active_strategies)
+    active = {(a["symbol"], a["name"]) for a in approved if a["active"]}
+    for row in report:
+        row["active"] = (row["symbol"], row["strategy"]) in active
+    return approved, report
+
+
+def load_csv(path: str) -> pd.DataFrame:
+    """Kerzen aus CSV (Spalten Open/High/Low/Close[/Volume], erste Spalte = Zeit, UTC)."""
+    raw = pd.read_csv(path, index_col=0, parse_dates=True)
+    raw.columns = [c.strip().lower() for c in raw.columns]
+    if "volume" not in raw:
+        raw["volume"] = 0.0
+    df = raw[["open", "high", "low", "close", "volume"]].astype(float)
+    idx = pd.DatetimeIndex(df.index)
+    df.index = (idx.tz_localize("UTC") if idx.tz is None else idx.tz_convert("UTC")).rename("time")
+    return df.sort_index()
+
+
+def mark_active(approved: list[dict[str, Any]], limit: int) -> None:
+    """Markiert die besten `limit` zugelassenen Strategien als aktiv (nach Sharpe, dann Trefferquote).
+    Höchstens eine Variante je Strategietyp und Markt, damit nicht fünfmal fast dasselbe gehandelt wird."""
+    ranked = sorted(approved, key=lambda a: (-a["metrics"]["sharpe"], -a["metrics"]["win_rate_pct"]))
+    seen: set[tuple[str, str]] = set()
+    for rec in ranked:
+        key = (rec["symbol"], rec["spec"]["type"])
+        rec["active"] = len(seen) < limit and key not in seen
+        if rec["active"]:
+            seen.add(key)
 
 
 def print_report(report: list[dict[str, Any]]) -> None:
     header = f"{'Symbol':<10} {'Strategie':<48} {'Rendite%':>9} {'MaxDD%':>7} {'Sharpe':>7} {'Treffer%':>9} {'Trades':>7}  Ergebnis"
     print("\n" + header + "\n" + "-" * len(header))
-    for r in sorted(report, key=lambda x: (not x["approved"], -x["metrics"]["sharpe"])):
+    for r in sorted(report, key=lambda x: (not x.get("active"), not x["approved"], -x["metrics"]["sharpe"])):
         m = r["metrics"]
-        verdict = "ZUGELASSEN" if r["approved"] else "abgelehnt: " + "; ".join(r["failures"][:2])
+        verdict = ("AKTIV" if r.get("active") else "zugelassen (Reserve)") if r["approved"] \
+            else "abgelehnt: " + "; ".join(r["failures"][:2])
         print(f"{r['symbol']:<10} {r['strategy']:<48} {m['return_pct']:>9.2f} {m['max_drawdown_pct']:>7.2f} "
               f"{m['sharpe']:>7.2f} {m['win_rate_pct']:>9.1f} {m['trades']:>7.0f}  {verdict}")
     print()

@@ -116,12 +116,12 @@ function renderStrategies() {
   const { report, approved } = status.state;
   if (!report.length) return [h("p", { class: "muted" }, "Noch keine Backtests. Bot starten oder „Strategien neu prüfen“."),
     btn("Strategien neu prüfen", () => act(() => call("research")), "primary")];
-  const rows = [...report].sort((a, b) => (b.approved - a.approved) || (b.metrics.sharpe - a.metrics.sharpe));
+  const rows = [...report].sort((a, b) => (!!b.active - !!a.active) || (b.approved - a.approved) || (b.metrics.sharpe - a.metrics.sharpe));
   return [
-    h("p", { class: "muted" }, `${approved.length} von ${report.length} zugelassen. Mindestwerte in den Einstellungen.`),
+    h("p", { class: "muted" }, `★ ${approved.filter((a) => a.active).length} aktiv · ✔ ${approved.filter((a) => !a.active).length} Reserve · ✘ ${report.length - approved.length} abgelehnt (von ${report.length} Tests). Mindest-Trefferquote ${status.cfg.backtest.minWinRatePct} %.`),
     h("table", {}, h("thead", {}, h("tr", {}, ...["Markt", "Strategie", "Rend.%", "DD%", "Sharpe", "Tr.%", "n"].map((t) => h("th", {}, t)))),
       h("tbody", {}, ...rows.map((r) => h("tr", { title: r.failures.join("; ") },
-        h("td", {}, (r.symbol || "").split("/")[0]), h("td", { class: r.approved ? "ok" : "muted" }, (r.approved ? "✔ " : "✘ ") + r.strategy + (r.source === "llm" ? " (LLM)" : "")),
+        h("td", {}, (r.symbol || "").split("/")[0]), h("td", { class: r.active ? "ok strong" : r.approved ? "" : "muted" }, (r.active ? "★ " : r.approved ? "✔ " : "✘ ") + r.strategy + (r.source === "llm" ? " (LLM)" : "")),
         h("td", {}, fmt(r.metrics.return_pct)), h("td", {}, fmt(r.metrics.max_drawdown_pct)), h("td", {}, fmt(r.metrics.sharpe)),
         h("td", {}, fmt(r.metrics.win_rate_pct, 0)), h("td", {}, r.metrics.trades))))),
     h("p", { class: "hint" }, "Mauszeiger über eine Zeile zeigt, warum eine Strategie abgelehnt wurde."),

@@ -35,6 +35,8 @@ class Fill:
     fee: float
     order_id: Optional[str] = None
     stop_order_id: Optional[str] = None
+    tp_order_id: Optional[str] = None
+    reason: Optional[str] = None          # z. B. "Take-Profit (Broker)", wenn der Broker selbst geschlossen hat
 
 
 @dataclass
@@ -51,6 +53,8 @@ class Position:
     regime: str = ""
     reason: str = ""
     stop_order_id: Optional[str] = None
+    side: int = 1                        # 1 = long, -1 = short (nur Forex)
+    tp_order_id: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -60,7 +64,22 @@ class Position:
         return cls(**d)
 
 
-class PaperBroker:
+class SpotLongOnly:
+    """Einheitliche Broker-Schnittstelle für Spot-Broker (nur Kauf, kein Leerverkauf)."""
+
+    manages_take_profit = False
+
+    def open_position(self, symbol: str, side: int, amount: float, stop: float, take_profit: float,
+                      ref_price: float) -> Fill:
+        if side != 1:
+            raise ValueError("Spot-Handel: nur Long-Positionen möglich")
+        return self.open_long(symbol, amount, stop, ref_price)
+
+    def close_position(self, pos: Position, ref_price: float) -> Fill:
+        return self.close_long(pos, ref_price)
+
+
+class PaperBroker(SpotLongOnly):
     """Simuliert Orders mit Gebühren und Slippage; es werden keine echten Orders gesendet."""
 
     mode = "paper"
@@ -95,7 +114,7 @@ class PaperBroker:
         return self.close_long(pos, min(pos.stop, last_price))
 
 
-class LiveBroker:
+class LiveBroker(SpotLongOnly):
     """Echte Orders über ccxt. Wird nur bei live_trading: true erzeugt."""
 
     mode = "live"
@@ -183,3 +202,42 @@ class LiveBroker:
         if status in ("canceled", "expired", "rejected"):
             raise StopOrderLost(f"Stop-Order {pos.stop_order_id} hat Status {status}")
         return None
+
+
+class PaperMarginBroker:
+    """Simuliertes Margin-Konto (Forex): Long und Short, Gewinn/Verlust wird beim Schließen verbucht.
+    Es werden keine echten Orders gesendet. Konto-Währung = Quote-Währung der Paare (z. B. USD)."""
+
+    mode = "paper"
+    manages_take_profit = False
+
+    def __init__(self, cfg: Config, state: dict):
+        self.fee = cfg.costs.fee_pct / 100
+        self.slip = cfg.costs.slippage_pct / 100
+        self.s = state.setdefault("paper", {"cash": float(cfg.capital.start)})
+
+    def cash(self) -> float:
+        return float(self.s["cash"])
+
+    def equity_value(self, positions: dict[str, Position], prices: dict[str, float]) -> float:
+        return self.cash() + sum(p.side * p.amount * (prices.get(sym, p.entry_price) - p.entry_price)
+                                 for sym, p in positions.items())
+
+    def open_position(self, symbol: str, side: int, amount: float, stop: float, take_profit: float,
+                      ref_price: float) -> Fill:
+        px = ref_price * (1 + side * self.slip)
+        fee = amount * px * self.fee
+        self.s["cash"] = self.cash() - fee
+        return Fill(px, amount, fee, order_id=f"paper-{uuid.uuid4().hex[:8]}")
+
+    def close_position(self, pos: Position, ref_price: float) -> Fill:
+        px = ref_price * (1 - pos.side * self.slip)
+        fee = pos.amount * px * self.fee
+        self.s["cash"] = self.cash() + pos.side * pos.amount * (px - pos.entry_price) - fee
+        return Fill(px, pos.amount, fee, order_id=f"paper-{uuid.uuid4().hex[:8]}")
+
+    def check_stop(self, pos: Position, extreme_since_entry: float, last_price: float) -> Optional[Fill]:
+        """Long: Tief seit Einstieg <= Stop. Short: Hoch seit Einstieg >= Stop."""
+        if pos.side == 1:
+            return self.close_position(pos, min(pos.stop, last_price)) if extreme_since_entry <= pos.stop else None
+        return self.close_position(pos, max(pos.stop, last_price)) if extreme_since_entry >= pos.stop else None

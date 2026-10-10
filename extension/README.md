@@ -1,6 +1,7 @@
 # Trading-Bot als Browser-Extension (Chrome/Edge/Brave, Manifest V3)
 
-Der komplette Bot läuft als Erweiterung im Browser: Marktanalyse, Strategie-Recherche (optional per LLM), Backtest mit
+Der komplette Bot läuft als Erweiterung im Browser: Marktanalyse, 25 Strategietypen in 33 Varianten (siehe
+[STRATEGIEN.md](../STRATEGIEN.md)), Strategie-Recherche (optional per LLM), Backtest mit
 Gebühren und Slippage, Strategie-Auswahl je Marktphase, Risikomanagement, Not-Aus und Trade-Log mit Begründung.
 Gehandelt werden **mehrere Märkte gleichzeitig: SOL, BTC und ETH gegen USDC auf Solana über Jupiter** (einzeln in den
 Optionen abschaltbar) mit einer eigenen Bot-Wallet. **Paper-Modus ist Standard.**
@@ -29,6 +30,13 @@ Die Logik ist ein 1:1-Port des Python-Bots (Kennzahlen stimmen in den Tests auf 
 2. Die Adresse mit **USDC** und ca. **0,1 SOL** (Gebühren) befüllen, z. B. aus Phantom. Sehr kleine Beträge zuerst.
 3. Optionen → **LIVE-Modus** einschalten (Bestätigung durch Eintippen von LIVE), `Kapital` = max. einzusetzendes USDC.
 4. Popup → Wallet **entsperren** → **Bot starten**.
+
+## Strategien: 55 % Trefferquote, 5 aktiv
+Jede der 33 Varianten wird je Markt gebacktestet. Zugelassen wird nur, was u. a. **mindestens 55 % Trefferquote** und
+zugleich Gewinn, Sharpe ≥ 1 und Profit Factor ≥ 1,2 erreicht. Davon handeln die **5 besten aktiv** (★ im Tab
+„Strategien“), der Rest ist Reserve (✔). Beides ist in den Optionen einstellbar. Hohe Trefferquoten allein machen
+keinen Gewinn – mehr dazu und ein Ergebnis auf echten Daten in [STRATEGIEN.md](../STRATEGIEN.md).
+Forex gibt es nur im Python-Bot (Interactive Brokers), nicht in der Extension.
 
 ## Mehrere Märkte gleichzeitig
 - Jeder Markt wird **einzeln** analysiert und gebacktestet; eine Strategie wird je Markt zugelassen oder abgelehnt
@@ -66,7 +74,7 @@ Die Logik ist ein 1:1-Port des Python-Bots (Kennzahlen stimmen in den Tests auf 
 
 ## Entwicklung / Tests
 ```bash
-node --test extension/test/*.test.mjs                       # 23 Tests (Node 20+)
+node --test extension/test/*.test.mjs                       # 25 Tests (Node 20+)
 python extension/test/make_parity_fixture.py                # Python-Referenzwerte neu erzeugen
 python extension/test/make_sign_fixture.py                  # Signatur-Referenz (solders) neu erzeugen
 ```

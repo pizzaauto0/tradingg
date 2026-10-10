@@ -1,0 +1,62 @@
+# ===================================================================
+#  Forex über Interactive Brokers (IBKR) – Long UND Short, Stop-Loss/Take-Profit liegen beim Broker.
+#  Start (Paper, Standard):   python main.py --config config.forex.yaml run
+#  Voraussetzung: TWS oder IB Gateway läuft und ist mit einem IB-PAPER-Konto eingeloggt (API aktiviert).
+#
+#  WARNUNG: Forex mit Hebel ist hochriskant. Laut Pflichthinweisen der EU-Broker verlieren die meisten
+#  Privatanleger mit gehebelten Produkten Geld. Der Hebel hier ergibt sich nur aus der Positionsgröße –
+#  das Risiko pro Trade bleibt durch risk_per_trade_pct und den Stop-Loss begrenzt.
+# ===================================================================
+live_trading: false        # true = Orders an das verbundene IB-Konto (erst mit Paper-Konto testen!)
+broker: ibkr
+
+ibkr:
+  host: 127.0.0.1
+  port: 4002               # IB Gateway: 4002 Paper / 4001 Live;  TWS: 7497 Paper / 7496 Live
+  client_id: 17
+  account: ""              # leer = erstes Konto
+  account_type: paper      # "paper": Bot verweigert echte Konten. Erst nach langem Test auf "live" stellen.
+
+market:
+  symbols: ["EUR/USD", "GBP/USD", "AUD/USD"]   # alle mit derselben Quote-Währung (USD)
+  timeframe: 15m
+  history_candles: 3000
+  live_lookback: 300
+  poll_seconds: 20
+  allow_short: true        # Forex: auch auf fallende Kurse handeln
+
+capital:
+  start: 1000              # Paper: Startguthaben (USD). Live: maximal berücksichtigter Kontowert
+
+risk:
+  risk_per_trade_pct: 1.0
+  max_daily_loss_pct: 3.0
+  close_positions_on_daily_limit: true
+  max_open_positions: 3
+  max_position_pct: 500    # Nominalwert bis 5x Kapital (= Hebel 1:5). EU-Grenze für Privatkunden: 1:30
+  atr_period: 14
+  atr_stop_mult: 2.0
+  take_profit_rr: 1.5
+  kill_switch_file: KILL_SWITCH
+
+costs:
+  fee_pct: 0.002           # IBKR-Kommission ca. 0,2 Basispunkte
+  slippage_pct: 0.005      # halber Spread + Slippage je Order (EUR/USD)
+
+backtest:
+  min_candles: 1000
+  min_trades: 20
+  min_return_pct: 1.0
+  max_drawdown_pct: 10.0
+  min_sharpe: 1.0
+  min_win_rate_pct: 55.0
+  min_profit_factor: 1.2
+  oos_fraction: 0.3
+  min_oos_return_pct: 0.0
+
+pipeline:
+  revalidate_hours: 24
+  max_active_strategies: 5
+
+paths:
+  data_dir: data_forex

@@ -44,7 +44,8 @@ def bollinger(close: pd.Series, n: int = 20, k: float = 2.0) -> tuple[pd.Series,
     return mid - k * std, mid, mid + k * std
 
 
-def adx(df: pd.DataFrame, n: int = 14) -> pd.Series:
+def dmi(df: pd.DataFrame, n: int = 14) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """Directional Movement (Wilder): +DI, -DI und ADX."""
     up = df["high"].diff()
     down = -df["low"].diff()
     plus_dm = pd.Series(np.where((up > down) & (up > 0), up, 0.0), index=df.index)
@@ -53,7 +54,18 @@ def adx(df: pd.DataFrame, n: int = 14) -> pd.Series:
     plus_di = 100 * plus_dm.ewm(alpha=1 / n, adjust=False, min_periods=n).mean() / atr_
     minus_di = 100 * minus_dm.ewm(alpha=1 / n, adjust=False, min_periods=n).mean() / atr_
     dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
-    return dx.ewm(alpha=1 / n, adjust=False, min_periods=n).mean()
+    return plus_di, minus_di, dx.ewm(alpha=1 / n, adjust=False, min_periods=n).mean()
+
+
+def adx(df: pd.DataFrame, n: int = 14) -> pd.Series:
+    return dmi(df, n)[2]
+
+
+def invert(df: pd.DataFrame) -> pd.DataFrame:
+    """Kehrwert-Kurse (z. B. EUR/USD -> USD/EUR). Ein Long-Signal auf dem Kehrwert ist ein Short-Signal auf dem
+    Original – so nutzen alle Strategien für Leerverkäufe exakt dieselbe Logik."""
+    return pd.DataFrame({"open": 1 / df["open"], "high": 1 / df["low"], "low": 1 / df["high"],
+                         "close": 1 / df["close"], "volume": df["volume"]}, index=df.index)
 
 
 # ------------------------------------------------------------ marktzustand

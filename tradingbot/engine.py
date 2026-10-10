@@ -10,7 +10,7 @@ from typing import Any, Callable, Optional
 
 import pandas as pd
 
-from .analysis import atr, classify_market
+from .analysis import atr, classify_market, invert
 from .config import Config
 from .data import MarketData
 from .execution import (Fill, InsufficientFunds, Position, StopOrderLost, StopPlacementError)
@@ -52,6 +52,9 @@ class TradingEngine:
         atomic_write_json(self.state_path, self.state)
 
     def equity(self) -> float:
+        """Kontowert: Spot = Bargeld + Wert der Bestände; Margin-Konto (Forex) liefert der Broker selbst."""
+        if hasattr(self.broker, "equity_value"):
+            return self.broker.equity_value(self.positions, self.last_prices)
         value = self.broker.cash()
         for sym, pos in self.positions.items():
             value += pos.amount * self.last_prices.get(sym, pos.entry_price)
@@ -70,7 +73,7 @@ class TradingEngine:
                 self.notifier.send(f"Fehler im Durchlauf: {type(exc).__name__}: {exc}")
             if self.stop_requested:
                 break
-            time.sleep(self.cfg.market.poll_seconds)
+            getattr(self.broker, "sleep", time.sleep)(self.cfg.market.poll_seconds)
         self.save_state()
         note = "Offene Positionen bleiben durch ihre Stops geschützt." if self.positions else "Keine offenen Positionen."
         self.notifier.send(f"Bot beendet. {note}")
@@ -142,31 +145,36 @@ class TradingEngine:
             last = float(live["close"].iloc[-1])
             entry_candle = pd.Timestamp(pos.opened_at).floor(f"{tf}s")
             after = live[live.index > entry_candle]
-            low_since = min(float(after["low"].min()) if len(after) else last, last)
+            if pos.side == 1:   # Long: Tief seit Einstieg gegen den Stop prüfen
+                extreme = min(float(after["low"].min()) if len(after) else last, last)
+            else:               # Short: Hoch seit Einstieg
+                extreme = max(float(after["high"].max()) if len(after) else last, last)
 
             try:
-                fill = self.broker.check_stop(pos, low_since, last)
+                fill = self.broker.check_stop(pos, extreme, last)
             except StopOrderLost as exc:
                 self.notifier.send(f"{sym}: Stop-Order verloren ({exc}) – Position wird geschlossen")
                 self._close(pos, last, "Stop-Order verloren – Sicherheits-Schließung", now)
                 continue
             if fill is not None:
-                self._record_exit(pos, fill, f"Stop-Loss bei {pos.stop:.2f} ausgelöst", now)
+                self._record_exit(pos, fill, fill.reason or f"Stop-Loss bei {pos.stop:.5g} ausgelöst", now)
                 continue
-            if last >= pos.take_profit:
-                self._close(pos, last, f"Take-Profit {pos.take_profit:.2f} erreicht", now)
+            target_hit = last >= pos.take_profit if pos.side == 1 else last <= pos.take_profit
+            if target_hit and not self.broker.manages_take_profit:
+                self._close(pos, last, f"Take-Profit {pos.take_profit:.5g} erreicht", now)
                 continue
             if is_new.get(sym):
                 strategy = build_strategy(pos.strategy_spec)
-                if bool(strategy.exit(closed).iloc[-1]):
+                frame = closed if pos.side == 1 else invert(closed)
+                if bool(strategy.exit(frame).iloc[-1]):
                     self._close(pos, last, f"Ausstiegssignal der Strategie {strategy.name}", now)
 
     def _close(self, pos: Position, ref_price: float, reason: str, now: datetime) -> None:
-        fill = self.broker.close_long(pos, ref_price)
+        fill = self.broker.close_position(pos, ref_price)
         self._record_exit(pos, fill, reason, now)
 
     def _record_exit(self, pos: Position, fill: Fill, reason: str, now: datetime) -> None:
-        pnl = (fill.price - pos.entry_price) * fill.amount - pos.entry_fee - fill.fee
+        pnl = pos.side * (fill.price - pos.entry_price) * fill.amount - pos.entry_fee - fill.fee
         self.positions.pop(pos.symbol, None)
         self._exited_this_tick.add(pos.symbol)  # kein Wiedereinstieg im selben Durchlauf
         self.last_prices.setdefault(pos.symbol, fill.price)
@@ -174,7 +182,7 @@ class TradingEngine:
         self.tradelog.record(ts=now.isoformat(), mode=self.cfg.mode, symbol=pos.symbol, action="EXIT",
                              price=fill.price, amount=fill.amount, fee=fill.fee, pnl=pnl,
                              strategy=pos.strategy_name, regime=pos.regime, reason=reason, equity=equity)
-        self.notifier.send(f"EXIT {pos.symbol} @ {fill.price:.2f} | PnL {pnl:+.2f} | {reason}")
+        self.notifier.send(f"EXIT {'LONG' if pos.side == 1 else 'SHORT'} {pos.symbol} @ {fill.price:.5g} | PnL {pnl:+.2f} | {reason}")
 
     def _flatten(self, reason: str, now: datetime) -> None:
         for sym, pos in list(self.positions.items()):
@@ -199,6 +207,26 @@ class TradingEngine:
         self.stop_requested = True
 
     # ----------------------------------------------------------- einstiege
+    def _pick_signal(self, sym: str, closed: pd.DataFrame):
+        """Sucht unter den aktiven Strategien ein Einstiegssignal. Long zuerst; Short (nur Forex) mit derselben
+        Logik auf den Kehrwert-Kursen – genau wie im Backtest. Gibt (Seite, Marktzustand, Auswahl, Frame) oder None."""
+        sides = [(1, closed)]
+        if self.cfg.market.allow_short:
+            sides.append((-1, invert(closed)))
+        for side, frame in sides:
+            try:
+                state = classify_market(frame)
+            except ValueError as exc:
+                log.warning("%s: Analyse nicht möglich: %s", sym, exc)
+                return None
+            selection = select_strategy(self.approved, sym, self.cfg.market.timeframe, state)
+            if selection is not None and bool(selection.strategy.entry(frame).iloc[-1]):
+                return side, state, selection, frame
+            if selection is None:
+                log.info("%s: keine aktive Strategie für %s (Marktphase %s)", sym,
+                         "Long" if side == 1 else "Short", state.regime)
+        return None
+
     def _look_for_entries(self, candles, is_new: dict[str, bool], now: datetime) -> None:
         for sym, (closed, live) in candles.items():
             if sym in self.positions or sym in self._exited_this_tick or not is_new.get(sym):
@@ -207,42 +235,44 @@ class TradingEngine:
             if not ok:
                 log.info("Kein Einstieg: %s", why)
                 return
-            try:
-                state = classify_market(closed)
-            except ValueError as exc:
-                log.warning("%s: Analyse nicht möglich: %s", sym, exc)
+            picked = self._pick_signal(sym, closed)
+            if picked is None:
                 continue
-            selection = select_strategy(self.approved, sym, self.cfg.market.timeframe, state)
-            if selection is None:
-                log.info("%s: keine zugelassene Strategie für Marktphase %s", sym, state.regime)
-                continue
+            side, state, selection, frame = picked
             strategy = selection.strategy
-            if not bool(strategy.entry(closed).iloc[-1]):
-                continue
 
             price = float(live["close"].iloc[-1])
             atr_value = float(atr(closed, self.cfg.risk.atr_period).iloc[-1])
-            stop, take_profit = stop_and_target(price, atr_value, self.cfg.risk)
+            stop, take_profit = stop_and_target(price, atr_value, self.cfg.risk, side,
+                                                strategy.stop_mult(self.cfg.risk.atr_stop_mult),
+                                                strategy.rr(self.cfg.risk.take_profit_rr))
             if stop <= 0:
                 log.warning("%s: ATR unbrauchbar, kein Einstieg", sym)
                 continue
             equity = self.equity()
-            raw = position_size(self.risk.sizing_equity(equity), self.broker.cash(), price, stop,
-                                self.cfg.risk, self.cfg.costs)
+            sizing = self.risk.sizing_equity(equity)
+            if hasattr(self.broker, "to_quote"):  # Forex: Kapital in die Quote-Währung des Paares umrechnen
+                sizing = self.broker.to_quote(sym, sizing)
+            raw = position_size(sizing, self.broker.cash(), price, stop, self.cfg.risk, self.cfg.costs,
+                                side, self.cfg.is_margin)
             amount = self.data.normalize_amount(sym, raw, price) if raw > 0 else 0.0
             if amount <= 0:
-                log.info("%s: Positionsgröße unter Börsenminimum (roh %.8f) – übersprungen", sym, raw)
+                log.info("%s: Positionsgröße unter Minimum (roh %.8f) – übersprungen", sym, raw)
                 continue
-            self._open(sym, strategy, selection, state, closed, amount, price, stop, take_profit, equity, now)
+            self._open(sym, side, strategy, selection, state, frame, amount, price, stop, take_profit, sizing, now)
 
-    def _open(self, sym, strategy, selection, state, closed, amount, price, stop, take_profit, equity, now) -> None:
-        risk_cash = amount * (price - stop)
-        reason = (f"{strategy.explain(closed)}; Marktphase: {state.summary()}; "
-                  f"Stop {stop:.2f} ({self.cfg.risk.atr_stop_mult}x ATR), Ziel {take_profit:.2f}; "
-                  f"Risiko ca. {risk_cash:.2f} ({risk_cash / equity * 100:.2f}% des Kapitals); "
-                  f"Backtest-Sharpe {selection.record.get('metrics', {}).get('sharpe', 0):.2f}")
+    def _open(self, sym, side, strategy, selection, state, frame, amount, price, stop, take_profit, sizing, now) -> None:
+        risk_cash = amount * abs(price - stop)
+        regime = state.regime if side == 1 else classify_market(invert(frame)).regime  # Marktphase des Originalkurses
+        direction = "LONG" if side == 1 else "SHORT"
+        m = selection.record.get("metrics", {})
+        reason = (f"{direction}: {strategy.explain(frame)}; Marktphase: {state.summary()}"
+                  f"{' (Kehrwert-Sicht für Short)' if side == -1 else ''}; "
+                  f"Stop {stop:.5g} ({strategy.stop_mult(self.cfg.risk.atr_stop_mult)}x ATR), Ziel {take_profit:.5g}; "
+                  f"Risiko ca. {risk_cash:.2f} ({risk_cash / sizing * 100:.2f}% des Kapitals); "
+                  f"Backtest: Sharpe {m.get('sharpe', 0):.2f}, Trefferquote {m.get('win_rate_pct', 0):.1f}%")
         try:
-            fill = self.broker.open_long(sym, amount, stop, price)
+            fill = self.broker.open_position(sym, side, amount, stop, take_profit, price)
         except StopPlacementError as exc:
             self.notifier.send(f"{sym}: Einstieg abgebrochen, Stop-Loss nicht platzierbar ({exc}). Position geschlossen.")
             return
@@ -255,16 +285,16 @@ class TradingEngine:
             return
         pos = Position(symbol=sym, amount=fill.amount, entry_price=fill.price, stop=stop, take_profit=take_profit,
                        entry_fee=fill.fee, opened_at=now.isoformat(), strategy_spec=strategy.to_spec(),
-                       strategy_name=strategy.name, regime=state.regime, reason=reason,
-                       stop_order_id=fill.stop_order_id)
+                       strategy_name=strategy.name, regime=regime, reason=reason,
+                       stop_order_id=fill.stop_order_id, side=side, tp_order_id=fill.tp_order_id)
         self.positions[sym] = pos
         self.last_prices[sym] = price
         self.save_state()  # Position sofort sichern
-        self.tradelog.record(ts=now.isoformat(), mode=self.cfg.mode, symbol=sym, action="ENTRY", price=fill.price,
-                             amount=fill.amount, fee=fill.fee, strategy=strategy.name, regime=state.regime,
-                             reason=reason, equity=self.equity())
-        self.notifier.send(f"ENTRY {sym} {fill.amount:.6f} @ {fill.price:.2f} | Stop {stop:.2f} | "
-                           f"{strategy.name} | {state.regime}")
+        self.tradelog.record(ts=now.isoformat(), mode=self.cfg.mode, symbol=sym, action="ENTRY",
+                             price=fill.price, amount=fill.amount, fee=fill.fee, strategy=strategy.name,
+                             regime=regime, reason=reason, equity=self.equity())
+        self.notifier.send(f"ENTRY {direction} {sym} {fill.amount:.6g} @ {fill.price:.5g} | Stop {stop:.5g} | "
+                           f"{strategy.name} | {regime}")
 
     # ------------------------------------------------------ strategien
     def _maybe_refresh_strategies(self, now: datetime) -> None:
@@ -276,7 +306,8 @@ class TradingEngine:
             return
         try:
             self.approved = self.refresher()
-            self.notifier.send(f"Strategien neu geprüft: {len(self.approved)} zugelassen")
+            active = sum(1 for a in self.approved if a.get("active", True))
+            self.notifier.send(f"Strategien neu geprüft: {len(self.approved)} zugelassen, {active} aktiv")
         except Exception as exc:  # noqa: BLE001 - alte Zulassungen gelten bis zum nächsten Erfolg weiter
             log.exception("Neuprüfung der Strategien fehlgeschlagen")
             self.notifier.send(f"Neuprüfung der Strategien fehlgeschlagen: {exc}")

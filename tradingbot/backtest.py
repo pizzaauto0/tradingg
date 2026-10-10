@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from .analysis import atr, regime_series
+from .analysis import atr, invert, regime_series
 from .config import BacktestCfg, Config
 from .risk import position_size, stop_and_target
 from .strategies import Strategy
@@ -29,6 +29,7 @@ class Trade:
     amount: float
     pnl: float
     exit_reason: str
+    side: int = 1
 
 
 @dataclass
@@ -46,6 +47,7 @@ class Backtester:
 
     def run(self, df: pd.DataFrame, strategy: Strategy, symbol: str = "",
             initial: float | None = None) -> BacktestResult:
+        """Spot (Long, Kauf mit Bargeld) oder – bei Forex – Margin-Konto mit Long und Short."""
         cfg = self.cfg
         initial = float(initial or cfg.capital.start)
         n = len(df)
@@ -53,48 +55,77 @@ class Backtester:
             raise ValueError(f"Zu wenige Kerzen für den Backtest: {n}")
         fee = cfg.costs.fee_pct / 100
         slip = cfg.costs.slippage_pct / 100
+        margin = cfg.is_margin
+        shorts = margin and cfg.market.allow_short
+        stop_mult = strategy.stop_mult(cfg.risk.atr_stop_mult)
+        rr = strategy.rr(cfg.risk.take_profit_rr)
 
-        entry_sig = strategy.entry(df).to_numpy(dtype=bool)
-        exit_sig = strategy.exit(df).to_numpy(dtype=bool)
-        regime_ok = regime_series(df).isin(strategy.regimes).to_numpy()
+        long_in = strategy.entry(df).to_numpy(dtype=bool)
+        long_out = strategy.exit(df).to_numpy(dtype=bool)
+        long_ok = regime_series(df).isin(strategy.regimes).to_numpy()
+        if shorts:  # Short = gleiche Logik auf den Kehrwert-Kursen
+            inv = invert(df)
+            short_in = strategy.entry(inv).to_numpy(dtype=bool)
+            short_out = strategy.exit(inv).to_numpy(dtype=bool)
+            short_ok = regime_series(inv).isin(strategy.regimes).to_numpy()
+        else:
+            short_in = short_out = short_ok = np.zeros(n, dtype=bool)
         atr_arr = atr(df, cfg.risk.atr_period).to_numpy()
         o, h, l, c = (df[k].to_numpy() for k in ("open", "high", "low", "close"))
         idx = df.index
 
-        cash, amount, entry_px, stop, tp = initial, 0.0, 0.0, 0.0, 0.0
-        cost_basis, entry_i = 0.0, 0
+        cash, amount, side, entry_px, stop, tp = initial, 0.0, 0, 0.0, 0.0, 0.0
+        cost_basis, entry_i = 0.0, 0  # Spot: Kaufpreis inkl. Gebühr; Margin: Einstiegsgebühr
         trades: list[Trade] = []
         equity = np.full(n, initial)
 
         def close_position(i: int, px: float, reason: str) -> None:
-            nonlocal cash, amount
-            proceeds = amount * px * (1 - fee)
-            trades.append(Trade(idx[entry_i], idx[i], entry_px, px, amount, proceeds - cost_basis, reason))
-            cash += proceeds
-            amount = 0.0
+            nonlocal cash, amount, side
+            if margin:
+                fee_out = amount * px * fee
+                gross = side * amount * (px - entry_px)
+                pnl = gross - cost_basis - fee_out
+                cash += gross - fee_out
+            else:
+                proceeds = amount * px * (1 - fee)
+                pnl = proceeds - cost_basis
+                cash += proceeds
+            trades.append(Trade(idx[entry_i], idx[i], entry_px, px, amount, pnl, reason, side))
+            amount, side = 0.0, 0
 
         for i in range(WARMUP, n):
             # 1) Signale der vorherigen Kerze zur Eröffnung dieser Kerze ausführen
-            if amount > 0 and exit_sig[i - 1]:
-                close_position(i, o[i] * (1 - slip), "signal")
-            elif amount == 0 and entry_sig[i - 1] and regime_ok[i - 1] and np.isfinite(atr_arr[i - 1]):
-                px = o[i] * (1 + slip)
-                stop_, tp_ = stop_and_target(px, atr_arr[i - 1], cfg.risk)
-                size = position_size(cash, cash, px, stop_, cfg.risk, cfg.costs) if stop_ > 0 else 0.0
-                if size > 0:
-                    amount, entry_px, stop, tp, entry_i = size, px, stop_, tp_, i
-                    cost_basis = amount * px * (1 + fee)
-                    cash -= cost_basis
-            # 2) Stop-Loss / Take-Profit innerhalb der Kerze
-            if amount > 0:
+            if amount > 0 and ((side == 1 and long_out[i - 1]) or (side == -1 and short_out[i - 1])):
+                close_position(i, o[i] * (1 - side * slip), "signal")
+            elif amount == 0 and np.isfinite(atr_arr[i - 1]):
+                s = 1 if (long_in[i - 1] and long_ok[i - 1]) else -1 if (short_in[i - 1] and short_ok[i - 1]) else 0
+                if s:
+                    px = o[i] * (1 + s * slip)
+                    stop_, tp_ = stop_and_target(px, atr_arr[i - 1], cfg.risk, s, stop_mult, rr)
+                    eq_now = cash
+                    size = position_size(eq_now, cash, px, stop_, cfg.risk, cfg.costs, s, margin) if stop_ > 0 else 0.0
+                    if size > 0:
+                        amount, side, entry_px, stop, tp, entry_i = size, s, px, stop_, tp_, i
+                        cost_basis = amount * px * fee if margin else amount * px * (1 + fee)
+                        cash -= cost_basis
+            # 2) Stop-Loss / Take-Profit innerhalb der Kerze (Stop zuerst, konservativ)
+            if amount > 0 and side == 1:
                 if l[i] <= stop:
                     close_position(i, min(stop, o[i]) * (1 - slip), "stop_loss")
                 elif h[i] >= tp:
                     close_position(i, max(tp, 0.0) * (1 - slip), "take_profit")
-            equity[i] = cash + amount * c[i]
+            elif amount > 0 and side == -1:
+                if h[i] >= stop:
+                    close_position(i, max(stop, o[i]) * (1 + slip), "stop_loss")
+                elif l[i] <= tp:
+                    close_position(i, max(tp, 0.0) * (1 + slip), "take_profit")
+            if margin:
+                equity[i] = cash + (side * amount * (c[i] - entry_px) if amount > 0 else 0.0)
+            else:
+                equity[i] = cash + amount * c[i]
 
         if amount > 0:  # offene Position zum letzten Kurs bewerten
-            close_position(n - 1, c[-1] * (1 - slip), "end_of_data")
+            close_position(n - 1, c[-1] * (1 - side * slip), "end_of_data")
             equity[-1] = cash
 
         eq = pd.Series(equity, index=idx)
@@ -105,7 +136,7 @@ class Backtester:
         cfg = self.cfg
         eq = eq.iloc[WARMUP:]
         rets = eq.pct_change().dropna()
-        bars_per_year = 365 * 86400 / cfg.timeframe_seconds
+        bars_per_year = (260 if cfg.is_margin else 365) * 86400 / cfg.timeframe_seconds  # Forex: nur Werktage
         std = rets.std(ddof=0)
         sharpe = float(rets.mean() / std * np.sqrt(bars_per_year)) if std > 0 else 0.0
         drawdown = (eq / eq.cummax() - 1).min() * 100

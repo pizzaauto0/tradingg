@@ -32,6 +32,7 @@ const SECTIONS = [
     ["backtest.minProfitFactor", "Min. Profit Factor", "number"],
     ["backtest.minOosReturnPct", "Min. Out-of-Sample-Rendite (%)", "number"],
     ["pipeline.revalidateHours", "Strategien neu prüfen alle (Stunden)", "number"],
+    ["pipeline.maxActiveStrategies", "Anzahl aktiv gehandelter Strategien", "number", "Nur die besten N zugelassenen Strategien handeln (je Typ und Markt höchstens eine)."],
   ]],
   ["Solana / Jupiter", [
     ["solana.rpcUrl", "RPC-URL", "text", "Für Dauerbetrieb eigenen RPC-Anbieter eintragen (Helius, QuickNode, …)."],

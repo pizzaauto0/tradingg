@@ -12,14 +12,15 @@ Alles in `config.yaml` änderbar: Krypto · Kraken (ccxt) · 15-Minuten-Kerzen/D
 
 ## Ordnerstruktur
 ```
-main.py                CLI: research | run | status | kill
-config.yaml            gesamte Konfiguration
+main.py                CLI: research | run | status | kill | evaluate | new-wallet | set-key
+config.yaml            Krypto (Kraken) · config.solana.yaml (Phantom/Solana) · config.forex.yaml (Forex/IBKR)
+STRATEGIEN.md          Katalog der 25 Strategien, Quellen und Ergebnis auf echten Daten
 requirements.txt
 .env.example           Vorlage für API-Keys (Umgebungsvariablen)
 tradingbot/
   data.py              1 Marktdaten (ccxt: Live-Kurse, Historie mit Paginierung)
   analysis.py          2 Indikatoren + Marktzustand (Trend/Seitwärts, Volatilität, Volumen)
-  strategies.py        Strategie-Bausteine (MA-Crossover, RSI, Breakout, Bollinger) mit validierten Parametern
+  strategies.py        25 Strategietypen (Trendfolge, Ausbruch, Mean Reversion) in 33 Varianten, validierte Parameter
   research.py          3 LLM-Recherche -> Kandidaten (nur JSON-Spezifikationen)
   backtest.py          4 Backtester (Gebühren, Slippage, Out-of-Sample) + Mindestwerte
   selector.py          5 Strategie-Auswahl je Marktphase
@@ -28,8 +29,9 @@ tradingbot/
   tradelog.py, notify.py   8 Logdatei, SQLite-Trade-Log mit Begründung, Telegram
   pipeline.py          Recherche -> Backtest -> Zulassung
   solana_broker.py     Solana-Wallet über Jupiter (optional)
+  ibkr.py              Forex über Interactive Brokers: Daten + Bracket-Orders (optional)
   engine.py            Hauptschleife
-tests/                 pytest (34 Tests, ohne Netzwerk)
+tests/                 pytest (80 Tests, ohne Netzwerk)
 ```
 
 ## Schnellstart (Paper-Modus)
@@ -47,9 +49,11 @@ Ergebnisse liegen in `data/`: `bot.log`, `trades.db` (SQLite, Tabelle `trades` m
 `strategies/approved.json` und `strategies/backtest_report.json`, Zustand in `state_paper.json`.
 
 ## Ablauf
-1. **Pipeline** (beim Start und alle `revalidate_hours`): Historie laden → Kandidaten (Standardstrategien, optional LLM) →
-   Backtest je Symbol mit Gebühren/Slippage → nur Strategien über allen Mindestwerten (`backtest:` in der Config:
-   Trades, Rendite, Max Drawdown, Sharpe, Trefferquote, Profit Factor, Out-of-Sample-Rendite) werden zugelassen.
+1. **Pipeline** (beim Start und alle `revalidate_hours`): Historie laden → 33 Kandidaten aus 25 Strategietypen
+   (optional plus LLM-Vorschläge) → Backtest je Symbol mit Gebühren/Slippage → nur Strategien über allen Mindestwerten
+   (`backtest:` in der Config: Trades, Rendite, Max Drawdown, Sharpe, **Trefferquote ≥ 55 %**, Profit Factor,
+   Out-of-Sample-Rendite) werden zugelassen → davon handeln die **5 besten aktiv** (`pipeline.max_active_strategies`),
+   der Rest ist Reserve. Details und das Ergebnis auf echten Daten: [STRATEGIEN.md](STRATEGIEN.md).
 2. **Pro neuer geschlossener Kerze**: Marktzustand bestimmen → unter den zugelassenen Strategien die mit dem besten
    Sharpe wählen, die zur Marktphase passt → Signal → Risiko-Check → Position mit Stop-Loss eröffnen.
    Der Backtester handelt nur in den Marktphasen, für die die Strategie gedacht ist, und nutzt dieselbe
@@ -135,3 +139,34 @@ keinen Schlüsselbund – dann `.env` mit Dateirechten `chmod 600` nutzen.
 Der Bot existiert zusätzlich als Chrome-Extension (Ordner `extension/`, SOL/BTC/ETH gegen USDC über Jupiter, Paper-Modus Standard).
 Installation und ausdrückliche Einschränkungen (Browser muss laufen, Wallet nach Neustart entsperren, Stop nur bot-seitig):
 siehe `extension/README.md`.
+
+## Forex (Interactive Brokers, `config.forex.yaml`)
+Forex läuft über **Interactive Brokers** (in Deutschland verfügbar, Paper-Konto kostenlos) mit der Bibliothek
+`ib_async`. OANDA scheidet aus: dessen Bot-Schnittstelle (v20 REST) ist laut OANDA für das EU-Unternehmen nicht
+verfügbar ([OANDA](https://developer.oanda.com/rest-live-v20/introduction/)).
+
+- **Long und Short:** Short-Signale entstehen aus derselben Strategie-Logik auf den Kehrwert-Kursen (EUR/USD → USD/EUR),
+  im Backtest genauso wie live.
+- **Stop-Loss und Take-Profit liegen beim Broker** (Bracket-Order mit OCA): die Position bleibt geschützt, auch wenn der
+  Bot ausfällt.
+- **Hebel:** `max_position_pct: 500` erlaubt einen Nominalwert bis 5× Kapital (EU-Grenze für Privatkunden: 30×). Das
+  eigentliche Risiko bleibt durch 1 % pro Trade und den Stop begrenzt. Forex mit Hebel ist hochriskant – laut den
+  Pflichthinweisen der EU-Broker verlieren die meisten Privatanleger damit Geld.
+- **Schutz:** Bei `ibkr.account_type: paper` verweigert der Bot jedes Konto, das kein IB-Paper-Konto ist (Kennung „DU…“).
+
+Einrichtung:
+1. IBKR-Konto eröffnen, in der Kontoverwaltung ein **Paper-Trading-Konto** aktivieren.
+2. **IB Gateway** (oder TWS) installieren, mit dem Paper-Konto einloggen, unter *Configure → Settings → API* die
+   API aktivieren (Port 4002 für Gateway-Paper, 7497 für TWS-Paper).
+3. `pip install -r requirements.txt`, dann `python main.py --config config.forex.yaml run` (Paper-Modus).
+4. Später zum Test am Broker: `live_trading: true` mit **weiter** `account_type: paper` – Orders gehen dann an das
+   IB-Paper-Konto. Echtes Geld erst nach langer Testphase mit `account_type: live` und Port 4001/7496.
+
+Hinweise: Die Verbindung zu IB konnte in der Entwicklungsumgebung nicht getestet werden (nur gegen eine simulierte
+IB-Schnittstelle). IB Gateway meldet sich täglich neu an; prüfe die Auto-Restart-Einstellung. Kleine Ordergrößen unter
+25.000 Einheiten werden als „Odd Lot“ mit etwas schlechterem Kurs ausgeführt.
+
+## Strategien gegen eigene Daten testen
+`python main.py --config <konfig> evaluate kurse.csv --symbol EUR/USD` testet alle 33 Varianten gegen eine CSV-Datei
+(Spalten: Zeit, Open, High, Low, Close, optional Volume; Zeitrahmen in der Konfig passend setzen) und zeigt Trefferquote,
+Rendite, Drawdown, Sharpe und welche Strategien zugelassen und aktiv wären.

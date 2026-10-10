@@ -48,7 +48,7 @@ backtest:
   min_return_pct: 2.0
   max_drawdown_pct: 15.0
   min_sharpe: 1.0
-  min_win_rate_pct: 35.0
+  min_win_rate_pct: 55.0
   min_profit_factor: 1.2
   oos_fraction: 0.3                  # letzter Teil der Historie als "Out-of-Sample"-Prüfung
   min_oos_return_pct: 0.0
@@ -56,6 +56,7 @@ backtest:
 # ---------------- Strategie-Pipeline ----------------
 pipeline:
   revalidate_hours: 24               # Recherche + Backtest wiederholen und Zulassungen erneuern
+  max_active_strategies: 5           # nur die 5 besten zugelassenen Strategien handeln aktiv
 
 llm:
   enabled: false                     # true + ANTHROPIC_API_KEY -> Strategie-Vorschläge per LLM

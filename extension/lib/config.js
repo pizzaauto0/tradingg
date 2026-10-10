@@ -24,9 +24,9 @@ export const DEFAULTS = {
   costs: { feePct: 0.10, slippagePct: 0.15 },
   backtest: {
     minCandles: 1000, minTrades: 20, minReturnPct: 2.0, maxDrawdownPct: 15.0, minSharpe: 1.0,
-    minWinRatePct: 35.0, minProfitFactor: 1.2, oosFraction: 0.3, minOosReturnPct: 0.0,
+    minWinRatePct: 55.0, minProfitFactor: 1.2, oosFraction: 0.3, minOosReturnPct: 0.0,
   },
-  pipeline: { revalidateHours: 24, historyCandles: 3000 },
+  pipeline: { revalidateHours: 24, historyCandles: 3000, maxActiveStrategies: 5 },
   solana: {
     rpcUrl: "https://api.mainnet-beta.solana.com",
     jupiterUrl: "https://lite-api.jup.ag/swap/v1",
@@ -69,6 +69,7 @@ export function validateConfig(c) {
   if (!(r.maxPositionPct > 0 && r.maxPositionPct <= 100)) fail("Max. Positionsgröße muss in (0, 100] % liegen.");
   if (!(r.atrPeriod >= 2 && r.atrStopMult > 0 && r.takeProfitRr > 0)) fail("ATR-/Stop-Parameter ungültig.");
   if (c.costs.feePct < 0 || c.costs.slippagePct < 0) fail("Kosten dürfen nicht negativ sein.");
+  if (!(Number.isInteger(c.pipeline.maxActiveStrategies) && c.pipeline.maxActiveStrategies >= 1)) fail("Anzahl aktiver Strategien muss eine ganze Zahl >= 1 sein.");
   if (!(c.backtest.oosFraction > 0 && c.backtest.oosFraction < 1)) fail("oosFraction muss in (0, 1) liegen.");
   if (!(c.solana.solReserve >= 0 && c.solana.slippageBps >= 1)) fail("Solana-Parameter ungültig.");
   if (!/^https:\/\//.test(c.solana.rpcUrl) || !/^https:\/\//.test(c.solana.jupiterUrl)) fail("RPC- und Jupiter-URL müssen mit https:// beginnen.");
