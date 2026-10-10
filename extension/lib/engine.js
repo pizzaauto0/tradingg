@@ -63,7 +63,8 @@ export class Engine {
       await this.notify(`Tagesverlust-Limit erreicht (${this.risk.dailyPnlPct(equity).toFixed(2)}%). Kein Handel bis zum nächsten UTC-Tag.`);
       if (this.cfg.risk.closePositionsOnDailyLimit) await this.flatten("Tagesverlust-Limit", now);
     }
-    if (!this.risk.halted) await this.lookForEntries(closed, live, isNew, now);
+    const obs = this.observe(closed, isNew, now, stamp, this.lastPrice, tfMs);
+    if (!this.risk.halted) await this.lookForEntries(closed, live, isNew, now, obs);
 
     state.lastCandle = stamp;
     await this.save();
@@ -140,16 +141,38 @@ export class Engine {
     }
   }
 
+  // ---- Sichtbarkeit: was der Bot gerade sieht und entscheidet (für die Anzeige im Popup) ----
+  observe(closed, isNew, now, stamp, price, tfMs) {
+    let market = null, sel = null, signal = null, note = "";
+    try {
+      market = classifyMarket(closed);
+      sel = selectStrategy(this.state.approved || [], this.cfg.timeframe, market);
+      signal = sel ? !!sel.strategy.entry(closed).at(-1) : null;
+    } catch (e) { note = e.message; }
+    this.state.activity = {
+      ts: now.toISOString(), price, regime: market?.regime ?? null, volatility: market?.volatility ?? null,
+      volume: market?.volume ?? null, adx: market?.adx ?? null, strategy: sel?.strategy.name ?? null, signal,
+      nextCandleAt: stamp + 2 * tfMs, halted: this.risk.halted, note,
+    };
+    if (isNew) {
+      const what = !market ? `Analyse nicht möglich (${note})`
+        : !sel ? `${market.regime}: keine zugelassene Strategie für diese Marktphase → warte`
+        : `${market.regime}: ${sel.strategy.name} → Signal ${signal ? "JA" : "nein"}`;
+      const log = this.state.decisions ||= [];
+      log.push({ ts: now.toISOString(), text: `Kerze geprüft · ${what}${this.position ? " · Position offen" : ""}${this.risk.halted ? " · Tageslimit aktiv" : ""}` });
+      this.state.decisions = log.slice(-30);
+    }
+    return { market, sel, signal };
+  }
+
   // ---- Einstiege ----
-  async lookForEntries(closed, live, isNew, now) {
+  async lookForEntries(closed, live, isNew, now, obs) {
     if (this.position || this.exitedThisTick || !isNew) return;
     const [ok, why] = this.risk.canOpen(Object.keys(this.state.positions).length);
     if (!ok) { console.info("Kein Einstieg:", why); return; }
-    const market = classifyMarket(closed);
-    const sel = selectStrategy(this.state.approved || [], this.cfg.timeframe, market);
-    if (!sel) { console.info(`Keine zugelassene Strategie für Marktphase ${market.regime}`); return; }
+    const { market, sel, signal } = obs;
+    if (!market || !sel || !signal) return;
     const { strategy } = sel;
-    if (!strategy.entry(closed).at(-1)) return;
 
     const price = last(live.close), atrValue = last(atr(closed, this.cfg.risk.atrPeriod));
     const [stop, takeProfit] = stopAndTarget(price, atrValue, this.cfg.risk);
@@ -185,6 +208,8 @@ export class Engine {
   async maybeRefresh(now) {
     const ageH = this.state.lastRefresh ? (now - Date.parse(this.state.lastRefresh)) / 3.6e6 : Infinity;
     if (ageH < this.cfg.pipeline.revalidateHours) return;
+    this.state.status = "Strategien werden recherchiert und gebacktestet …";
+    await this.save();
     try {
       const res = await this.refresher();
       this.state.approved = res.approved;
@@ -194,6 +219,7 @@ export class Engine {
       await this.notify(`Neuprüfung der Strategien fehlgeschlagen: ${e.message}`);
     }
     this.state.lastRefresh = now.toISOString();
+    this.state.status = null;
   }
 }
 

@@ -145,3 +145,23 @@ test("Konfiguration: Grenzen und Modus-Schutz", async () => {
   assert.throws(() => validateConfig(mergeConfig(DEFAULTS, { timeframe: "1m" })), /Zeitrahmen/);
   assert.equal(DEFAULTS.liveTrading, false);
 });
+
+test("Aktivität: Bot zeigt Kurs, Marktphase, Strategie und protokolliert jede geprüfte Kerze", async () => {
+  const world = trendWorld(1500);
+  const f = await setupPaper(world);
+  await approveBreakout(f);
+  await handle({ type: "start" }, f);
+  await whenIdle();
+  await runTick({ fetchFn: f, now: at(world.df.t.at(-1)) });
+  let s = await getStatus();
+  assert.equal(s.state.activity.regime, "uptrend");
+  assert.equal(s.state.activity.strategy, "breakout(lookback=10,exit_lookback=5)");
+  assert.equal(typeof s.state.activity.signal, "boolean");
+  assert.ok(s.state.activity.nextCandleAt > world.df.t.at(-1));
+  assert.equal(s.state.decisions.length, 0, "erste Kerze wird nur gesehen, nicht bewertet");
+  world.df = trendWorld(1501, false).df; world.df.t = world.df.t.map((t) => t + TF_MS);
+  await runTick({ fetchFn: f, now: at(world.df.t.at(-1)) });
+  s = await getStatus();
+  assert.match(s.state.decisions[0].text, /Kerze geprüft · uptrend: breakout.*Signal (JA|nein)/);
+  await handle({ type: "tickNow" }, f);
+});

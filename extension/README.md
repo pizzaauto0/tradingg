@@ -16,7 +16,10 @@ Die Logik ist ein 1:1-Port des Python-Bots (Kennzahlen stimmen in den Tests auf 
 1. Popup → **Bot starten**. Beim ersten Start werden Historie geladen, alle Kandidaten gebacktestet und nur Strategien
    über den Mindestwerten zugelassen (Tab „Strategien“). Danach läuft alle 30 Sekunden ein Durchlauf.
 2. Einstellungen (Rechtsklick auf das Symbol → Optionen): Kapital, Risiko, Tageslimit, Mindestwerte, optional LLM/Telegram.
-3. **NOT-AUS** schließt die Position sofort und stoppt den Bot.
+3. Im Popup zeigt die Karte **Aktivität**, dass der Bot arbeitet: grün pulsierender Punkt, „Letzte Prüfung vor X s“,
+   aktueller Kurs, Marktphase, gewählte Strategie, Einstiegssignal, Countdown bis zur nächsten Kerzenprüfung und ein
+   Protokoll jeder geprüften Kerze. Das Symbol zeigt „ON“. „Jetzt prüfen“ löst sofort einen Durchlauf aus.
+4. **NOT-AUS** schließt die Position sofort und stoppt den Bot.
 
 ## Live-Modus (erst nach mehrwöchigem Paper-Test)
 1. Tab **Wallet** → Passwort wählen → **Neue Wallet erzeugen**. Den angezeigten Backup-Schlüssel **offline sichern**

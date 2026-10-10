@@ -33,6 +33,35 @@ const card = (title, ...kids) => h("div", { class: "card" }, h("h3", {}, title),
 const btn = (label, onclick, cls = "", disabled = false) => h("button", { class: `btn ${cls}`, onclick, disabled }, label);
 const ago = (iso) => (iso ? `${Math.round((Date.now() - Date.parse(iso)) / 60000)} min her` : "–");
 
+// ---------------------------------------------------------------- Aktivität
+const mmss = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+
+function activityCard() {
+  const { state } = status, a = state.activity, secs = state.lastTick ? (Date.now() - Date.parse(state.lastTick)) / 1000 : null;
+  const alive = state.enabled && secs != null && secs < 120;
+  const dot = h("span", { class: `dot ${alive ? "alive" : state.enabled ? "stale" : "off"}` });
+  const failing = state.enabled && state.lastError && !alive;
+  const headline = !state.enabled ? "Bot gestoppt" : state.status ? state.status
+    : failing ? `Durchlauf fehlgeschlagen: ${state.lastError}`
+    : secs == null ? "Wartet auf den ersten Durchlauf (alle 30 s) …" : alive ? "Bot arbeitet" : "Kein Lebenszeichen – ist der Browser aktiv?";
+  const lines = [h("div", { class: "headline" }, dot, headline)];
+  if (state.enabled && secs != null) lines.push(row("Letzte Prüfung", `vor ${Math.round(secs)} s`));
+  if (a) {
+    lines.push(row("SOL-Kurs", a.price != null ? `${fmt(a.price)} USD` : "–"),
+      row("Marktphase", a.regime ? `${a.regime} · Vol. ${a.volatility} · ADX ${fmt(a.adx, 0)}` : (a.note || "–")),
+      row("Gewählte Strategie", a.strategy ?? "keine passende zugelassen", a.strategy ? "" : "muted"),
+      row("Einstiegssignal", a.signal == null ? "–" : a.signal ? "JA (wird bei Kerzenschluss geprüft)" : "nein", a.signal ? "ok" : ""),
+      row("Nächste Kerzenprüfung in", h("span", { id: "countdown", "data-t": a.nextCandleAt }, mmss(a.nextCandleAt - Date.now()))));
+  }
+  if (state.enabled && state.report.length && !state.approved.length && !state.status) lines.push(h("div", { class: "hint" }, "Keine Strategie hat den Backtest bestanden – der Bot wartet und prüft täglich neu."));
+  if (status.state.decisions?.length) lines.push(h("div", { class: "decisions" }, ...status.state.decisions.map((d) =>
+    h("div", {}, h("span", { class: "muted" }, new Date(d.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) + " "), d.text))));
+  return card("Aktivität", ...lines);
+}
+
+// Countdown läuft sekündlich, ohne das Popup neu zu zeichnen.
+setInterval(() => { const c = document.getElementById("countdown"); if (c) c.textContent = mmss(Number(c.dataset.t) - Date.now()); }, 1000);
+
 // ---------------------------------------------------------------- Status
 function renderStatus() {
   const { cfg, state, vault } = status, live = cfg.liveTrading, pos = Object.values(state.positions)[0];
@@ -44,6 +73,7 @@ function renderStatus() {
   if (live && state.locked) out.push(h("div", { class: "error" }, "Wallet gesperrt – Bot kann weder handeln noch Stops auslösen. Im Tab „Wallet“ entsperren."));
   if (live) out.push(h("div", { class: "warn" }, "LIVE-Modus: echte Orders mit echtem Geld. Der Stop-Loss wird nur vom Bot überwacht und wirkt nur, solange Browser und Wallet entsperrt laufen."));
 
+  out.push(activityCard());
   out.push(card("Bot",
     row("Zustand", state.enabled ? "läuft" : "gestoppt", state.enabled ? "ok" : "muted"),
     row("Letzter Durchlauf", ago(state.lastTick)),
@@ -52,6 +82,7 @@ function renderStatus() {
     h("div", { class: "btns" },
       state.enabled ? btn("Stoppen", () => act(() => call("stop"))) : btn("Bot starten", () => act(() => call("start")), "primary"),
       btn("Strategien neu prüfen", () => act(async () => { const r = await call("research"); showError(""); alert(`${r.approved} von ${r.tested} Tests bestanden (${r.candles} Kerzen).`); })),
+      state.enabled && btn("Jetzt prüfen", () => act(() => call("tickNow"))),
     ),
     h("div", { class: "btns" }, btn("NOT-AUS: Position schließen & stoppen", () => act(() => call("kill")), "danger")),
   ));

@@ -35,3 +35,11 @@ code, .mono { font-family:ui-monospace,monospace; font-size:12px; word-break:bre
 .secret { background:var(--bg); border:1px dashed var(--bad); padding:8px; border-radius:6px; user-select:all; }
 h1 { font-size:20px; } h2 { font-size:15px; margin:22px 0 6px; }
 .hint { color:var(--muted); font-size:12px; margin:-4px 0 8px; }
+
+.headline { display:flex; align-items:center; gap:8px; font-weight:600; margin-bottom:4px; }
+.dot { width:10px; height:10px; border-radius:50%; background:var(--muted); flex:none; }
+.dot.alive { background:var(--ok); animation:pulse 1.6s ease-out infinite; }
+.dot.stale { background:var(--bad); }
+@keyframes pulse { 0% { box-shadow:0 0 0 0 rgba(46,160,67,.6); } 100% { box-shadow:0 0 0 9px rgba(46,160,67,0); } }
+.decisions { margin-top:6px; padding-top:6px; border-top:1px solid var(--line); font-size:12px; }
+@media (prefers-reduced-motion: reduce) { .dot.alive { animation:none; } }

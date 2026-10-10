@@ -116,7 +116,7 @@ export async function getStatus() {
     cfg: safeCfg,
     state: { enabled: state.enabled, killRequested: !!state.killRequested, locked: !!state.locked, pending: state.pending || null,
       positions: state.positions, risk: state.risk || {}, paperCash: state.paper?.cash ?? null, approved: state.approved,
-      report: state.report, lastRefresh: state.lastRefresh || null, lastTick: state.lastTick || null, lastError: state.lastError || null },
+      report: state.report, activity: state.activity || null, decisions: (state.decisions || []).slice(-8).reverse(), status: state.status || null, lastRefresh: state.lastRefresh || null, lastTick: state.lastTick || null, lastError: state.lastError || null },
     vault: { exists: await hasVault(), address: await vaultAddress(), unlocked: !!(await getUnlockedKey()) },
     trades: (await getLocal("trades", [])).slice(-50).reverse(),
     events: (await getLocal("eventLog", [])).slice(-30).reverse(),
@@ -138,6 +138,7 @@ export async function handle(msg, fetchFn = fetch) {
       runTick({ fetchFn }); // im Hintergrund, blockiert das Popup nicht
       return true;
     }
+    case "tickNow": await whenIdle(); await runTick({ fetchFn }); return true;
     case "stop": { const st = await loadState(cfg); st.enabled = false; await setLocal(stateKey(cfg), st); return true; }
     case "kill": {
       const st = await loadState(cfg);
