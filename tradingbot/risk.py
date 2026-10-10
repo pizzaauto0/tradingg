@@ -26,7 +26,8 @@ def position_size(equity: float, cash: float, entry: float, stop: float,
     per_unit_risk = (entry - stop) + (entry + stop) * cost
     amount = equity * risk.risk_per_trade_pct / 100 / per_unit_risk
     amount = min(amount, equity * risk.max_position_pct / 100 / entry)
-    amount = min(amount, cash / (entry * (1 + cost)))
+    # Kauf kostet entry * (1 + slippage) * (1 + fee) je Einheit (multiplikativ, nicht additiv)
+    amount = min(amount, cash / (entry * (1 + costs.slippage_pct / 100) * (1 + costs.fee_pct / 100)))
     return max(amount, 0.0)
 
 

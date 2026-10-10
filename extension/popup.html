@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trading-Bot</title>
+  <link rel="stylesheet" href="ui.css">
+</head>
+<body class="popup">
+  <header>
+    <div><strong>Trading-Bot</strong> <span class="muted">SOL/USDC</span></div>
+    <span id="mode" class="pill"></span>
+  </header>
+  <nav>
+    <button data-tab="status" class="active">Status</button>
+    <button data-tab="strategies">Strategien</button>
+    <button data-tab="trades">Trades</button>
+    <button data-tab="wallet">Wallet</button>
+  </nav>
+  <div id="error" class="error" hidden></div>
+  <main id="view"></main>
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Trading-Bot SOL/USDC",
+  "version": "1.0.0",
+  "description": "Automatischer Trading-Bot für SOL/USDC mit Backtest, Risikomanagement und Paper-Modus als Standard.",
+  "minimum_chrome_version": "120",
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_popup": "popup.html", "default_title": "Trading-Bot" },
+  "options_page": "options.html",
+  "permissions": ["storage", "alarms", "notifications"],
+  "host_permissions": [
+    "https://api.kraken.com/*",
+    "https://www.bitstamp.net/*",
+    "https://lite-api.jup.ag/*",
+    "https://api.jup.ag/*",
+    "https://api.mainnet-beta.solana.com/*",
+    "https://api.anthropic.com/*",
+    "https://api.telegram.org/*"
+  ],
+  "optional_host_permissions": ["https://*/*"],
+  "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'self'" },
+  "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
+}

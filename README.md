@@ -130,3 +130,8 @@ Betriebssystem-Schlüsselbund (macOS Keychain, Windows Credential Manager, Linux
 automatisch; eine Umgebungsvariable hat Vorrang. In Phantom: Konto-Menü → Settings → Manage Accounts → Bot-Konto →
 Show Private Key (nie die Recovery-Phrase und nie das Hauptkonto). Auf einem Linux-Server ohne Desktop gibt es evtl.
 keinen Schlüsselbund – dann `.env` mit Dateirechten `chmod 600` nutzen.
+
+## Browser-Extension
+Der Bot existiert zusätzlich als Chrome-Extension (Ordner `extension/`, SOL/USDC über Jupiter, Paper-Modus Standard).
+Installation und ausdrückliche Einschränkungen (Browser muss laufen, Wallet nach Neustart entsperren, Stop nur bot-seitig):
+siehe `extension/README.md`.
