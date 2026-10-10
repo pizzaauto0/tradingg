@@ -86,3 +86,12 @@ Neue Strategietypen fügst du als Klasse in `strategies.py` hinzu.
   mehr Historie und strengere Werte machen die Zulassung robuster. Wenn nichts zugelassen wird, handelt der Bot nicht.
 - Die Live-Order-Logik (insbesondere die Stop-Order über ccxt `stopLossPrice`) ist gegen eine Test-Börse geprüft, nicht
   gegen eine echte – teste sie mit kleinem Betrag, bevor du ihr vertraust.
+
+## Dauerbetrieb im Hintergrund (`deploy/`)
+Der Bot lädt API-Keys automatisch aus `.env` (Vorlage: `.env.example`, nicht einchecken).
+- **Linux:** `deploy/tradingbot.service` (systemd-User-Dienst, niedrige Priorität, Neustart nach Absturz)
+- **macOS:** `deploy/com.tradingbot.plist` (launchd)
+- **Windows:** `deploy/install_windows.ps1` (Aufgabenplanung, unsichtbar, niedrige Priorität)
+
+Der Rechner muss durchlaufen (kein Standby), sonst pausiert der Bot; Positionen bleiben durch ihre Börsen-Stops
+geschützt. Für echten 24/7-Betrieb ist ein kleiner VPS zuverlässiger. Die Not-Aus-Datei `KILL_SWITCH` wirkt auch hier.

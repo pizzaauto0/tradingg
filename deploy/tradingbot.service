@@ -1,0 +1,22 @@
+# Linux (systemd, ohne Root):
+#   mkdir -p ~/.config/systemd/user && cp deploy/tradingbot.service ~/.config/systemd/user/
+#   Pfade unten anpassen, dann:
+#   systemctl --user daemon-reload && systemctl --user enable --now tradingbot
+#   loginctl enable-linger $USER      # läuft auch ohne Login weiter
+#   Logs: journalctl --user -u tradingbot -f
+[Unit]
+Description=Trading-Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/tradingg
+ExecStart=%h/tradingg/.venv/bin/python main.py run
+Restart=always
+RestartSec=30
+Nice=19
+IOSchedulingClass=idle
+CPUQuota=25%
+
+[Install]
+WantedBy=default.target

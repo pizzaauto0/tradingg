@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from datetime import timedelta
 from pathlib import Path
@@ -26,6 +27,18 @@ from tradingbot.tradelog import TradeLog, setup_logging
 from tradingbot.util import utcnow
 
 log = logging.getLogger("main")
+
+
+def load_env_file(path: str = ".env") -> None:
+    """Lädt KEY=VALUE-Zeilen aus .env in die Umgebung (bereits gesetzte Variablen haben Vorrang)."""
+    p = Path(path)
+    if not p.exists():
+        return
+    for line in p.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
 def cmd_research(cfg) -> int:
@@ -120,6 +133,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("kill")
     args = parser.parse_args(argv)
 
+    load_env_file()
     try:
         cfg = load_config(args.config)
     except ConfigError as exc:

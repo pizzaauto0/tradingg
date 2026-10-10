@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- macOS: Pfade anpassen, dann
+     cp deploy/com.tradingbot.plist ~/Library/LaunchAgents/
+     launchctl load ~/Library/LaunchAgents/com.tradingbot.plist
+     Stoppen: launchctl unload ~/Library/LaunchAgents/com.tradingbot.plist -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.tradingbot</string>
+  <key>WorkingDirectory</key><string>/Users/DEINNAME/tradingg</string>
+  <key>ProgramArguments</key><array>
+    <string>/Users/DEINNAME/tradingg/.venv/bin/python</string><string>main.py</string><string>run</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>Nice</key><integer>19</integer>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>/tmp/tradingbot.out</string>
+  <key>StandardErrorPath</key><string>/tmp/tradingbot.err</string>
+</dict></plist>
