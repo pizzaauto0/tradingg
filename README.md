@@ -27,8 +27,9 @@ tradingbot/
   risk.py              7 Risikomanagement, Tageslimit, Kill Switch
   tradelog.py, notify.py   8 Logdatei, SQLite-Trade-Log mit Begründung, Telegram
   pipeline.py          Recherche -> Backtest -> Zulassung
+  solana_broker.py     Solana-Wallet über Jupiter (optional)
   engine.py            Hauptschleife
-tests/                 pytest (29 Tests, ohne Netzwerk)
+tests/                 pytest (34 Tests, ohne Netzwerk)
 ```
 
 ## Schnellstart (Paper-Modus)
@@ -95,3 +96,26 @@ Der Bot lädt API-Keys automatisch aus `.env` (Vorlage: `.env.example`, nicht ei
 
 Der Rechner muss durchlaufen (kein Standby), sonst pausiert der Bot; Positionen bleiben durch ihre Börsen-Stops
 geschützt. Für echten 24/7-Betrieb ist ein kleiner VPS zuverlässiger. Die Not-Aus-Datei `KILL_SWITCH` wirkt auch hier.
+
+## Phantom / Solana (`broker: solana`)
+Phantom ist eine Wallet, kein Broker, und lässt sich nicht fernsteuern. Der Bot handelt deshalb **SOL ↔ USDC über den
+Jupiter-Aggregator** mit einer **eigenen Bot-Wallet**, die er selbst signiert. Phantom nutzt du nur zum Ansehen/Befüllen.
+Signale kommen weiter aus Börsendaten (SOL/USD), nur die Ausführung läuft auf Solana. Konfiguration: `config.solana.yaml`.
+
+1. In Phantom ein **neues Konto nur für den Bot** anlegen (nicht die Haupt-Wallet!) und dessen privaten Schlüssel
+   exportieren → `SOLANA_PRIVATE_KEY` in `.env`. Der Schlüssel liegt damit im Klartext auf dem Rechner: nur Geld in die
+   Wallet legen, dessen Totalverlust du verkraftest.
+2. Wallet befüllen: **USDC** (Handelskapital) und ca. **0,1 SOL** (Gebühren; `sol_reserve` wird nie verkauft).
+3. Paper-Test: `python main.py --config config.solana.yaml research` und `... run` (läuft ohne Schlüssel).
+4. Live: in `config.solana.yaml` `live_trading: true`, `capital.start` = max. USDC, dann `... run`. Beim Start steht die
+   Wallet-Adresse mit Salden in der Ausgabe – mit Phantom abgleichen. Mit sehr kleinem Betrag anfangen.
+
+**Unterschiede zur Börse – bitte ernst nehmen:**
+- **Kein Stop an der Gegenseite.** Der Stop-Loss wird vom Bot im `poll_seconds`-Takt geprüft und dann per Swap verkauft.
+  Fällt Rechner/Internet/Bot aus, ist die Position **ungeschützt**. Der Bot muss also zuverlässig laufen (am besten VPS).
+- Kurs-Lücken, Slippage und MEV können Stops schlechter ausführen als berechnet. Schutz: `slippage_bps`,
+  `max_deviation_pct` (Abbruch bei > 1 % Abweichung vom Marktpreis) und `max_price_impact_pct`.
+- Nur SOL (liquide Majors). Memecoins/kleine Tokens sind bewusst nicht unterstützt (Rug Pulls, Honeypots, keine Historie).
+- Der öffentliche Solana-RPC ist rate-limitiert; für Dauerbetrieb einen eigenen RPC-Anbieter eintragen.
+- Ein Swap kann bestätigt werden, nachdem der Bot das Zeitlimit meldet. Bei der Meldung „Status unklar“ die Wallet prüfen.
+- Jupiters API-URL/Konditionen können sich ändern (`jupiter_url` in der Config) – gegen die aktuelle Doku prüfen.

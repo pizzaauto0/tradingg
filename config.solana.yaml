@@ -1,0 +1,51 @@
+# Solana-/Phantom-Variante: Signale aus Börsendaten (SOL/USD), Ausführung per Jupiter mit eigener Bot-Wallet.
+# Start:  python main.py --config config.solana.yaml run        (Paper, solange live_trading: false)
+live_trading: false
+broker: solana
+
+solana:
+  rpc_url: https://api.mainnet-beta.solana.com   # für Dauerbetrieb besser eigener RPC (Helius, QuickNode, ...)
+  private_key_env: SOLANA_PRIVATE_KEY
+  jupiter_url: https://lite-api.jup.ag/swap/v1
+  sol_reserve: 0.05            # SOL, das für Netzwerkgebühren nie verkauft wird
+  slippage_bps: 50             # 0.5 % maximale Slippage je Swap
+  max_price_impact_pct: 0.5
+  max_deviation_pct: 1.0       # Abbruch, wenn der Jupiter-Preis > 1 % vom Marktpreis abweicht
+  priority_fee_lamports: 50000
+
+exchange:
+  id: kraken                   # nur Datenquelle für Kurse
+market:
+  symbols: ["SOL/USD"]
+  timeframe: 15m
+  history_candles: 3000
+  history_exchange: bitstamp   # falls SOL/USD dort fehlt, andere ccxt-Börse eintragen
+  poll_seconds: 10             # Stop wird bot-seitig geprüft -> kurzes Intervall
+
+capital:
+  start: 300                   # Live: maximal eingesetztes USDC
+
+risk:
+  risk_per_trade_pct: 1.0
+  max_daily_loss_pct: 5.0
+  max_open_positions: 1
+  max_position_pct: 50.0
+  kill_switch_file: KILL_SWITCH
+
+costs:
+  fee_pct: 0.10                # DEX-Routing-Gebühren grob, im Preis enthalten
+  slippage_pct: 0.15
+
+backtest:
+  min_candles: 1000
+  min_trades: 20
+  min_return_pct: 2.0
+  max_drawdown_pct: 15.0
+  min_sharpe: 1.0
+  min_win_rate_pct: 35.0
+  min_profit_factor: 1.2
+  oos_fraction: 0.3
+  min_oos_return_pct: 0.0
+
+paths:
+  data_dir: data_solana

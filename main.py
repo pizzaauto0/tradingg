@@ -22,6 +22,7 @@ from tradingbot.engine import TradingEngine, load_state
 from tradingbot.execution import LiveBroker, PaperBroker
 from tradingbot.notify import Notifier
 from tradingbot.pipeline import research_and_backtest
+from tradingbot.solana_broker import SolanaBroker
 from tradingbot.store import StrategyStore
 from tradingbot.tradelog import TradeLog, setup_logging
 from tradingbot.util import utcnow
@@ -54,6 +55,8 @@ def cmd_run(cfg, once: bool) -> int:
         print("=" * 70)
         print(" LIVE-MODUS: Es werden ECHTE Orders mit echtem Geld platziert!")
         print(f" Maximal eingesetztes Kapital: {cfg.capital.start} {cfg.quote}")
+        if cfg.broker == "solana":
+            print(" Broker: Solana/Jupiter – Stop-Loss wird vom Bot überwacht (keine Börsen-Stop-Order)!")
         print("=" * 70)
     else:
         print("PAPER-MODUS: simulierter Handel, es werden keine echten Orders gesendet.")
@@ -62,7 +65,13 @@ def cmd_run(cfg, once: bool) -> int:
     store = StrategyStore(cfg.data_dir)
     state_path = cfg.data_dir / "state_live.json" if cfg.live_trading else cfg.data_dir / "state_paper.json"
     state = load_state(state_path)
-    broker = LiveBroker(cfg) if cfg.live_trading else PaperBroker(cfg, state)
+    if not cfg.live_trading:
+        broker = PaperBroker(cfg, state)
+    elif cfg.broker == "solana":
+        broker = SolanaBroker(cfg)
+        print(f" Bot-Wallet: {broker.owner}  (SOL: {broker.sol_balance():.4f}, USDC: {broker.usdc_balance():.2f})")
+    else:
+        broker = LiveBroker(cfg)
     notifier = Notifier(cfg)
 
     def refresh():

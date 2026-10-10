@@ -24,6 +24,19 @@ class ExchangeCfg:
 
 
 @dataclass
+class SolanaCfg:
+    rpc_url: str = "https://api.mainnet-beta.solana.com"
+    private_key_env: str = "SOLANA_PRIVATE_KEY"
+    jupiter_url: str = "https://lite-api.jup.ag/swap/v1"
+    usdc_mint: str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    sol_reserve: float = 0.05
+    slippage_bps: int = 50
+    max_price_impact_pct: float = 0.5
+    max_deviation_pct: float = 1.0
+    priority_fee_lamports: int = 50000
+
+
+@dataclass
 class MarketCfg:
     symbols: list[str] = field(default_factory=lambda: ["BTC/USD", "ETH/USD"])
     timeframe: str = "15m"
@@ -98,7 +111,9 @@ class PathsCfg:
 @dataclass
 class Config:
     live_trading: bool = False
+    broker: str = "ccxt"                  # ccxt (Börse) | solana (Wallet über Jupiter)
     exchange: ExchangeCfg = field(default_factory=ExchangeCfg)
+    solana: SolanaCfg = field(default_factory=SolanaCfg)
     market: MarketCfg = field(default_factory=MarketCfg)
     capital: CapitalCfg = field(default_factory=CapitalCfg)
     risk: RiskCfg = field(default_factory=RiskCfg)
@@ -127,6 +142,11 @@ class Config:
         return Path(self.paths.data_dir)
 
     def live_credentials(self) -> tuple[str, str]:
+        if self.broker == "solana":
+            key = os.environ.get(self.solana.private_key_env, "")
+            if not key:
+                raise ConfigError(f"Live-Modus (solana) benötigt die Umgebungsvariable {self.solana.private_key_env}.")
+            return key, ""
         key = os.environ.get(self.exchange.api_key_env, "")
         secret = os.environ.get(self.exchange.api_secret_env, "")
         if not key or not secret:
@@ -140,8 +160,14 @@ class Config:
         e = ConfigError
         if not isinstance(self.live_trading, bool):
             raise e("live_trading muss true oder false sein.")
+        if self.broker not in ("ccxt", "solana"):
+            raise e("broker muss 'ccxt' oder 'solana' sein.")
         if not self.market.symbols:
             raise e("market.symbols darf nicht leer sein.")
+        if self.broker == "solana" and any(sym.split("/")[0] != "SOL" for sym in self.market.symbols):
+            raise e("broker 'solana' unterstützt derzeit nur SOL-Symbole (z. B. SOL/USD).")
+        if self.solana.sol_reserve < 0 or self.solana.slippage_bps < 1:
+            raise e("solana.sol_reserve >= 0 und slippage_bps >= 1 erforderlich.")
         quotes = set()
         for s in self.market.symbols:
             if s.count("/") != 1 or not all(s.split("/")):
