@@ -50,6 +50,8 @@ Basierend auf der Strategie-Übersicht von trading.de (Trendkanal, Swing/Pullbac
 | Range: Unterstützung kaufen | `range_support` |
 | Mean Reversion: Bollinger | `bollinger_reversion` |
 
+**Top 5 mit über 55 % Trefferquote:** Button daneben (ebenfalls Paper-only). Die fünf Varianten stammen aus einem Testlauf auf echten EUR/USD-15m-Kerzen (Trefferquote 56–68 %): Pullback im Trend, Stochastik, Connors RSI(2), Z-Score- und Bollinger-Rückkehr. Nur die ersten beiden waren dort auch im Plus; hohe Trefferquote allein heißt nicht Gewinn.
+
 **Testtrade:** Im Bot-Kasten gibt es im Paper-Modus den Button „Testtrade (Paper)". Er eröffnet sofort eine kleine Spielgeld-Position (normale Risikoregeln, Stop und Ziel) ohne Strategie-Signal, damit du den ganzen Ablauf siehst. Im Trade-Log steht „TESTTRADE". Im Live-Modus gesperrt.
 
 ## Auf dem Handy: Steuerung per Telegram

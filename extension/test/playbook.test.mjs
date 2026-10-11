@@ -68,3 +68,16 @@ test("Unterstützungs-Strategie: kauft nur an der Unterstützung mit bullischer 
   assert.equal(s.entry(df)[k], false);
   assert.throws(() => buildStrategy({ type: "range_support", params: { lookback: 20, zone: 0.5, min_range_pct: 1, exit_frac: 0.4 } }), /exit_frac/);
 });
+
+test("Trefferquote-Set: 5 feste Strategien, alle aktiv, nur Paper", async () => {
+  const { WINRATE5 } = await import("../lib/strategies.js");
+  assert.equal(WINRATE5.length, 5);
+  installFakeChrome();
+  await handle({ type: "saveConfig", patch: { assets: ["SOL"], backtest: { profile: "winrate" } } });
+  assert.throws(() => validateConfig(mergeConfig(DEFAULTS, { liveTrading: true, backtest: { profile: "winrate" } })), /nur im Paper-Modus/);
+  const world = { df: makeCandles(1500, Math.floor(Date.now() / TF_MS) * TF_MS - 3 * TF_MS) };
+  await handle({ type: "research" }, marketFetch(world));
+  const s = await getStatus();
+  assert.deepEqual([...new Set(s.state.report.map((x) => x.title))].sort(), WINRATE5.map((p) => p.title).sort());
+  assert.ok(s.state.approved.length >= 5 && s.state.approved.every((a) => a.active && a.explore));
+});

@@ -91,6 +91,7 @@ function renderStatus() {
     btn("Not-Aus aufheben", () => act(() => call("clearKill")))));
   if (live && state.locked) out.push(h("div", { class: "error" }, "Wallet gesperrt – Bot kann weder handeln noch Stops auslösen. Im Tab „Wallet“ entsperren."));
   if (cfg.backtest.profile === "explore") out.push(h("div", { class: "warn" }, "ERKUNDUNGSMODUS (nur Paper): gelockerte Prüfung – Trades sind experimentell und nicht bewiesen."));
+  if (cfg.backtest.profile === "winrate") out.push(h("div", { class: "warn" }, "TREFFERQUOTE-SET (nur Paper): 5 feste Strategien mit >55 % Treffern im Testlauf. Hohe Trefferquote heißt NICHT Gewinn – drei der fünf waren dort im Minus."));
   if (cfg.backtest.profile === "playbook") out.push(h("div", { class: "warn" }, "PLAYBOOK-MODUS (nur Paper): 5 feste Strategien, der Bot wählt je Marktphase die passende. Sie wurden NICHT als profitabel geprüft – Trades sind experimentell."));
   if (live) out.push(h("div", { class: "warn" }, "LIVE-Modus: echte Orders mit echtem Geld. Der Stop-Loss wird nur vom Bot überwacht und wirkt nur, solange Browser und Wallet entsperrt laufen."));
 
@@ -163,6 +164,12 @@ function diagnosisCard(report, approved) {
       await call("saveConfig", { patch: { backtest: { profile: "playbook" } } });
       alert(researchSummary(await call("research")));
     }), "primary")));
+  if (!cfg.liveTrading && cfg.backtest.profile !== "winrate") lines.push(h("div", { class: "btns" },
+    btn("Top 5 mit über 55 % Trefferquote (nur Paper)", () => act(async () => {
+      if (!confirm("Der Bot nutzt fest 5 Strategien mit Trefferquote über 55 % (aus einem Testlauf auf EUR/USD-Kerzen): Pullback im Trend, Stochastik, Connors RSI(2), Z-Score- und Bollinger-Rückkehr. Hohe Trefferquote heißt NICHT Gewinn: drei der fünf waren im Testlauf im Minus. Nur Paper (Spielgeld).\n\nFortfahren?")) return;
+      await call("saveConfig", { patch: { backtest: { profile: "winrate" } } });
+      alert(researchSummary(await call("research")));
+    }))));
   if (!cfg.liveTrading && cfg.backtest.profile !== "strict") lines.push(h("div", { class: "btns" },
     btn("Zurück zu strengen Regeln", () => act(async () => {
       await call("saveConfig", { patch: { backtest: { profile: "strict" } } });
@@ -178,7 +185,7 @@ function renderStrategies() {
   const rows = [...report].sort((a, b) => (!!b.active - !!a.active) || (b.approved - a.approved) || (b.metrics.sharpe - a.metrics.sharpe));
   return [
     status.cfg.backtest.profile === "explore" && h("div", { class: "warn" }, "ERKUNDUNGSMODUS (nur Paper): gelockerte Mindestwerte. Zugelassene Strategien sind NICHT bewiesen – Trades dienen nur zum Ausprobieren."),
-    status.cfg.backtest.profile === "playbook" && h("div", { class: "warn" }, "PLAYBOOK-MODUS (nur Paper): 5 feste Strategien – ✔ in der Tabelle heißt hier nur „gesetzt“, nicht „profitabel“. Fahre über eine Zeile, um die strengen Prüfwerte zu sehen."),
+    (status.cfg.backtest.profile === "playbook" || status.cfg.backtest.profile === "winrate") && h("div", { class: "warn" }, "FESTES 5ER-SET (nur Paper): 5 feste Strategien – ✔ in der Tabelle heißt hier nur „gesetzt“, nicht „profitabel“. Fahre über eine Zeile, um die strengen Prüfwerte zu sehen."),
     diagnosisCard(report, approved),
     h("p", { class: "muted" }, `★ ${approved.filter((a) => a.active).length} aktiv · ✔ ${approved.filter((a) => !a.active).length} Reserve · ✘ ${report.length - approved.length} abgelehnt (von ${report.length} Tests). Mindest-Trefferquote ${status.cfg.backtest.minWinRatePct} %.`),
     h("div", { class: "tablewrap" }, h("table", {}, h("thead", {}, h("tr", {}, ...["Markt", "Strategie", "Rend.%", "DD%", "Sharpe", "Tr.%", "n"].map((t) => h("th", {}, t)))),

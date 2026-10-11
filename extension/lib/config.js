@@ -69,7 +69,7 @@ export function mergeConfig(base, over) {
 export function validateConfig(c) {
   const fail = (msg) => { throw new Error(msg); };
   if (typeof c.liveTrading !== "boolean") fail("liveTrading muss true/false sein.");
-  if (!["strict", "explore", "playbook"].includes(c.backtest.profile)) fail("Prüfmodus muss 'strict', 'explore' oder 'playbook' sein.");
+  if (!["strict", "explore", "playbook", "winrate"].includes(c.backtest.profile)) fail("Prüfmodus muss 'strict', 'explore', 'playbook' oder 'winrate' sein.");
   if (c.liveTrading && c.backtest.profile !== "strict") fail("Erkundungs- und Playbook-Modus (ungeprüfte Strategien) sind nur im Paper-Modus erlaubt – für Live gilt immer 'strict'.");
   if (!Array.isArray(c.assets) || !c.assets.length || c.assets.some((a) => !Object.hasOwn(ASSETS, a))) {
     fail(`assets muss eine nicht leere Liste aus ${Object.keys(ASSETS).join(", ")} sein.`);

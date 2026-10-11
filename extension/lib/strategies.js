@@ -383,6 +383,21 @@ export function playbookCandidates() {
   return PLAYBOOK.map(({ title, type, params, idea }) => ({ ...buildStrategy({ type, params }).toSpec(), source: "playbook", title, rationale: idea }));
 }
 
+// WINRATE5: fünf Varianten mit Trefferquote >= 55 % in einem Testlauf auf echten EUR/USD-Kerzen (15m, 2017/18). Nur ZWEI davon
+// (trend_pullback, stochastic) waren dort auch im Plus; die anderen drei hatten hohe Trefferquote bei negativer Rendite.
+export const WINRATE5 = [
+  { title: "Pullback im Trend (68 % Treffer)", type: "trend_pullback", params: { trend: 100, down_bars: 4, exit_ma: 5, rr: 1.0 }, idea: "Testlauf EUR/USD: Trefferquote 68,1 %, Rendite +1,5 %" },
+  { title: "Stochastik (56 % Treffer)", type: "stochastic", params: { k: 14, d: 3, oversold: 20, overbought: 80 }, idea: "Testlauf EUR/USD: Trefferquote 55,8 %, Rendite +0,6 %" },
+  { title: "Connors RSI(2) (62 % Treffer)", type: "connors_rsi2", params: { trend: 200, rsi_period: 2, oversold: 10, exit_ma: 5 }, idea: "Testlauf EUR/USD: Trefferquote 62,1 %, aber Rendite -3,3 %" },
+  { title: "Z-Score-Rückkehr (58 % Treffer)", type: "zscore_reversion", params: { period: 30, entry_z: 2.5, exit_z: -0.5, rr: 1.0 }, idea: "Testlauf EUR/USD: Trefferquote 58,4 %, aber Rendite -2,7 %" },
+  { title: "Bollinger-Rückkehr (58 % Treffer)", type: "bollinger_reversion", params: { period: 20, num_std: 2.5, stop_mult: 3.0, rr: 1.0 }, idea: "Testlauf EUR/USD: Trefferquote 58,4 %, aber Rendite -4,8 %" },
+];
+
+export function fixedCandidates(profile) {
+  const list = profile === "winrate" ? WINRATE5 : PLAYBOOK;
+  return list.map(({ title, type, params, idea }) => ({ ...buildStrategy({ type, params }).toSpec(), source: profile, title, rationale: idea }));
+}
+
 export function defaultCandidates() {
   return DEFAULT_SPECS.map(([type, params]) => {
     const s = buildStrategy({ type, params });

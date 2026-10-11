@@ -24,7 +24,7 @@ const SECTIONS = [
     ["costs.slippagePct", "Slippage je Order (%)", "number"],
   ]],
   ["Backtest-Mindestwerte", [
-    ["backtest.profile", "Prüfmodus", ["strict", "explore", "playbook"], "strict = strenge Mindestwerte (Standard, gilt für Live). explore = stark gelockert. playbook = 5 feste Strategien von trading.de, der Bot wählt die passende (keine Mindestwerte). explore und playbook NUR im Paper-Modus: nicht bewiesen, Verluste wahrscheinlich."],
+    ["backtest.profile", "Prüfmodus", ["strict", "explore", "playbook", "winrate"], "winrate = 5 feste Strategien mit Trefferquote über 55 % (Testlauf), nur Paper. strict = strenge Mindestwerte (Standard, gilt für Live). explore = stark gelockert. playbook = 5 feste Strategien von trading.de, der Bot wählt die passende (keine Mindestwerte). explore und playbook NUR im Paper-Modus: nicht bewiesen, Verluste wahrscheinlich."],
     ["backtest.minTrades", "Min. Trades", "number"],
     ["backtest.minReturnPct", "Min. Rendite (%)", "number"],
     ["backtest.maxDrawdownPct", "Max. Drawdown (%)", "number"],

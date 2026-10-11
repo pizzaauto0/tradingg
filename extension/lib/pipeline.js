@@ -5,7 +5,7 @@ import { checkThresholds, runBacktest } from "./backtest.js";
 import { collectCandidates } from "./research.js";
 import { fetchHistory } from "./data.js";
 import { effectiveThresholds, symbolOf } from "./config.js";
-import { playbookCandidates } from "./strategies.js";
+import { fixedCandidates } from "./strategies.js";
 
 export async function researchAndBacktest(cfg, fetchFn = fetch, histories = null) {
   const frames = {}, problems = [];
@@ -24,8 +24,8 @@ export async function researchAndBacktest(cfg, fetchFn = fetch, histories = null
   const first = Object.keys(frames)[0];
   let state = null;
   try { state = classifyMarket(frames[first]); } catch { /* zu wenig Daten für den Kontext */ }
-  const playbook = cfg.backtest.profile === "playbook";
-  const candidates = playbook ? playbookCandidates() : await collectCandidates(cfg, state, fetchFn);
+  const playbook = cfg.backtest.profile === "playbook" || cfg.backtest.profile === "winrate"; // feste 5er-Sets
+  const candidates = playbook ? fixedCandidates(cfg.backtest.profile) : await collectCandidates(cfg, state, fetchFn);
 
   const approved = [], report = [];
   for (const spec of candidates) {
