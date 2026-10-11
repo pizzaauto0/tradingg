@@ -30,6 +30,10 @@ test("Erkundungsmodus lockert die Mindestwerte; strenge Werte bleiben Standard",
   const explore = mergeConfig(DEFAULTS, { backtest: { profile: "explore" } });
   assert.equal(checkThresholds(m, effectiveThresholds(explore.backtest)).ok, true);
   assert.ok(EXPLORE_THRESHOLDS.minSharpe < DEFAULTS.backtest.minSharpe);
+  // knapp gescheiterte Strategien aus der Praxis (SOL, 15m): Trefferquote 43,5 % bzw. 40 % reichen im Erkundungsmodus
+  const nearMiss = { trades: 10, return_pct: 0.48, max_drawdown_pct: 3, sharpe: 0.3, win_rate_pct: 40, profit_factor: 1.2, oos_return_pct: -1.67 };
+  assert.equal(checkThresholds(nearMiss, effectiveThresholds(explore.backtest)).ok, true);
+  assert.equal(checkThresholds({ ...nearMiss, return_pct: -0.2 }, effectiveThresholds(explore.backtest)).ok, false, "Verlust im Backtest bleibt ein Ausschlussgrund");
 });
 
 test("Erkundungsmodus ist im Live-Modus verboten", async () => {

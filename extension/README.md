@@ -47,7 +47,9 @@ zu niedrig 33×“), und die „knapp Gescheiterten“. Typische Gründe: Seitw�
 Was du ändern kannst (Optionen):
 - **Zeitrahmen 1h oder 30m** statt 15m: weniger Trades, die Kosten fallen weniger ins Gewicht, und die 3000 Kerzen
   Historie reichen weiter zurück (125 statt 31 Tage). Ob das für deine Märkte mehr Zulassungen ergibt, ist ungetestet.
-- **Prüfmodus „explore“ (nur Paper):** stark gelockerte Mindestwerte, damit du den Bot handeln siehst. Die Strategien sind
+- **Prüfmodus „explore“ (nur Paper):** gelockerte Mindestwerte (Trefferquote ab 35 %, mindestens 8 Trades, Backtest
+  mindestens im Plus, Sharpe ≥ 0, Profit Factor ≥ 1,0), damit du den Bot handeln siehst. Ein Knopf **„Regeln lockern (nur Paper)
+  & neu prüfen“** unter „Warum (nicht)?“ schaltet ihn um. Die Strategien sind
   dann **nicht bewiesen**, jeder Trade ist im Log als „EXPERIMENTELL“ markiert, ein Banner erinnert dich daran, und der
   Modus ist im Live-Modus technisch gesperrt. Beim Umschalten werden alte Zulassungen verworfen und neu geprüft.
 - Die Mindestwerte selbst lockern – das macht Trades häufiger, aber nicht besser.

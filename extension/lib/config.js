@@ -40,7 +40,7 @@ export const DEFAULTS = {
 };
 
 // Gelockerte Mindestwerte des Erkundungsmodus (nur Paper): zeigt Trades, beweist aber nichts.
-export const EXPLORE_THRESHOLDS = { minTrades: 10, minReturnPct: 0, maxDrawdownPct: 25, minSharpe: 0, minWinRatePct: 45, minProfitFactor: 1.0, minOosReturnPct: -5 };
+export const EXPLORE_THRESHOLDS = { minTrades: 8, minReturnPct: 0, maxDrawdownPct: 25, minSharpe: 0, minWinRatePct: 35, minProfitFactor: 1.0, minOosReturnPct: -5 };
 export const effectiveThresholds = (bt) => (bt.profile === "explore" ? { ...bt, ...EXPLORE_THRESHOLDS } : bt);
 
 export const ALLOWED_TIMEFRAMES = ["5m", "15m", "30m", "1h"];

@@ -135,6 +135,17 @@ function diagnosisCard(report, approved) {
   if (!approved.length) lines.push(h("div", { class: "hint" }, cfg.backtest.profile === "explore"
     ? "Auch mit gelockerten Werten besteht nichts – der Markt bietet aktuell keine Strategie mit Vorteil."
     : "Mit den strengen Standardwerten besteht nichts. Das ist bei ruhigen oder seitwärts laufenden Märkten und hohen Handelskosten normal. Mehr Optionen: Einstellungen → Prüfmodus / Zeitrahmen."));
+  if (!cfg.liveTrading && cfg.backtest.profile === "strict") lines.push(h("div", { class: "btns" },
+    btn("Regeln lockern (nur Paper) & neu prüfen", () => act(async () => {
+      if (!confirm("Gelockerte Regeln: Der Bot handelt dann auch mit Strategien, die die strengen Prüfungen NICHT bestehen (Backtest nur knapp im Plus, Trefferquote ab 35 %). Nur im Paper-Modus (Spielgeld). Die Trades sind nicht bewiesen und als EXPERIMENTELL markiert.\n\nFortfahren?")) return;
+      await call("saveConfig", { patch: { backtest: { profile: "explore" } } });
+      alert(researchSummary(await call("research")));
+    }), "primary")));
+  if (!cfg.liveTrading && cfg.backtest.profile === "explore") lines.push(h("div", { class: "btns" },
+    btn("Zurück zu strengen Regeln", () => act(async () => {
+      await call("saveConfig", { patch: { backtest: { profile: "strict" } } });
+      alert(researchSummary(await call("research")));
+    }))));
   return card("Warum (nicht)?", ...lines);
 }
 
