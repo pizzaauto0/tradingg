@@ -612,6 +612,37 @@ class CCIReversion(Strategy):
         return self._cci(df) > self.params["exit_level"]
 
 
+class RangeSupport(Strategy):
+    type_name = "range_support"
+    default_regimes = ("sideways",)
+    param_spec = {"lookback": (int, 20, 200), "zone": (float, 0.05, 0.5), "min_range_pct": (float, 0.2, 10.0),
+                  "exit_frac": (float, 0.4, 1.0)}
+    description = ("Range-Trading: Kauf, wenn der Kurs die Unterstützung (Tief der letzten N Kerzen) berührt und eine "
+                   "bullische Kerze schließt; Ausstieg in der Nähe des Widerstands (Hoch der letzten N Kerzen).")
+    source = "Unterstützungs-/Widerstandshandel, Range Trading (trading.de, Technische Analyse nach Murphy)"
+
+    def _check(self):
+        if self.params["exit_frac"] <= self.params["zone"]:
+            raise ValueError("range_support: exit_frac muss größer als zone sein")
+
+    def _levels(self, df):
+        n = self.params["lookback"]
+        sup = df["low"].rolling(n).min().shift(1)
+        res = df["high"].rolling(n).max().shift(1)
+        return sup, res - sup
+
+    def entry(self, df):
+        sup, width = self._levels(df)
+        wide_enough = width / df["close"] * 100 >= self.params["min_range_pct"]
+        touched = df["low"] <= sup + self.params["zone"] * width
+        bullish = df["close"] > df["open"]
+        return wide_enough & touched & bullish & (df["close"] >= sup)
+
+    def exit(self, df):
+        sup, width = self._levels(df)
+        return df["close"] >= sup + self.params["exit_frac"] * width
+
+
 class VWAPReversion(Strategy):
     type_name = "vwap_reversion"
     default_regimes = ("sideways",)
@@ -652,7 +683,7 @@ STRATEGY_TYPES: dict[str, type[Strategy]] = {
         MACrossover, TripleEMA, MACDCross, MACDZero, ADXTrend, Supertrend, ParabolicSAR, Ichimoku, HeikinAshi,
         ROCMomentum, Breakout, SqueezeBreakout, InsideBarBreakout, SessionBreakout, RSIReversion, ConnorsRSI2,
         IBSReversion, BollingerReversion, KeltnerReversion, ZScoreReversion, WilliamsR, StochasticCross,
-        CCIReversion, VWAPReversion, PullbackInTrend,
+        CCIReversion, RangeSupport, VWAPReversion, PullbackInTrend,
     )
 }
 
@@ -703,6 +734,7 @@ DEFAULT_SPECS: list[tuple[str, dict[str, Any]]] = [
     ("williams_r", {"period": 14, "oversold": 90, "exit_level": 30}),
     ("stochastic", {"k": 14, "d": 3, "oversold": 20, "overbought": 80}),
     ("cci_reversion", {"period": 20, "level": 150, "exit_level": 0}),
+    ("range_support", {"lookback": 48, "zone": 0.25, "min_range_pct": 1.0, "exit_frac": 0.8}),
     ("vwap_reversion", {"period": 96, "deviation": 1.0}),
     ("trend_pullback", {"trend": 200, "down_bars": 3, "exit_ma": 5}),
     ("trend_pullback", {"trend": 100, "down_bars": 4, "exit_ma": 5, "rr": 1.0}),

@@ -273,6 +273,20 @@ export const STRATEGY_TYPES = {
     entry: (df, p) => lt(cci(df, p.period), -p.level),
     exit: (df, p) => gt(cci(df, p.period), p.exit_level),
   },
+  range_support: {
+    defaultRegimes: S, paramSpec: { lookback: ["int", 20, 200], zone: ["float", 0.05, 0.5], min_range_pct: ["float", 0.2, 10.0], exit_frac: ["float", 0.4, 1.0] },
+    description: "Range-Trading: Kauf, wenn der Kurs die Unterstützung (Tief der letzten N Kerzen) berührt und eine bullische Kerze schließt; Ausstieg in der Nähe des Widerstands (Hoch der letzten N Kerzen).",
+    source: "Unterstützungs-/Widerstandshandel, Range Trading (trading.de, Technische Analyse nach Murphy)",
+    check: (p) => { if (p.exit_frac <= p.zone) throw new Error("range_support: exit_frac muss größer als zone sein"); },
+    entry(df, p) {
+      const sup = shift(rollMin(df.low, p.lookback)), res = shift(rollMax(df.high, p.lookback));
+      return df.close.map((c, i) => { const w = res[i] - sup[i]; return (w / c) * 100 >= p.min_range_pct && df.low[i] <= sup[i] + p.zone * w && c > df.open[i] && c >= sup[i]; });
+    },
+    exit(df, p) {
+      const sup = shift(rollMin(df.low, p.lookback)), res = shift(rollMax(df.high, p.lookback));
+      return df.close.map((c, i) => c >= sup[i] + p.exit_frac * (res[i] - sup[i]));
+    },
+  },
   vwap_reversion: {
     defaultRegimes: S, paramSpec: { period: ["int", 20, 200], deviation: ["float", 0.2, 5.0] },
     description: "Kurs liegt X % unter dem gleitenden VWAP -> Kauf; Ausstieg bei Rückkehr zum VWAP (braucht Volumen).",
@@ -350,9 +364,24 @@ export const DEFAULT_SPECS = [
   ["keltner_reversion", { period: 20, mult: 2.0 }],
   ["zscore_reversion", { period: 50, entry_z: 2.0, exit_z: 0.0 }], ["zscore_reversion", { period: 30, entry_z: 2.5, exit_z: -0.5, rr: 1.0 }],
   ["williams_r", { period: 14, oversold: 90, exit_level: 30 }], ["stochastic", { k: 14, d: 3, oversold: 20, overbought: 80 }],
-  ["cci_reversion", { period: 20, level: 150, exit_level: 0 }], ["vwap_reversion", { period: 96, deviation: 1.0 }],
+  ["cci_reversion", { period: 20, level: 150, exit_level: 0 }], ["range_support", { lookback: 48, zone: 0.25, min_range_pct: 1.0, exit_frac: 0.8 }], ["vwap_reversion", { period: 96, deviation: 1.0 }],
   ["trend_pullback", { trend: 200, down_bars: 3, exit_ma: 5 }], ["trend_pullback", { trend: 100, down_bars: 4, exit_ma: 5, rr: 1.0 }],
 ];
+
+// PLAYBOOK: fünf feste Strategien, abgeleitet aus „Die 10 besten Trading Strategien“ (trading.de/lernen/strategien).
+// Nur was sich als eindeutige Kursregel umsetzen lässt (News, Gap, Carry Trade und Smart Money Concepts nicht; Daytrading,
+// Scalping und Swing sind Handelsstile, keine Regeln). Die Marktphase entscheidet, welche davon gerade „passt“.
+export const PLAYBOOK = [
+  { title: "Trendkanal-Ausbruch", type: "breakout", params: { lookback: 55, exit_lookback: 20 }, idea: "Trend-/Trendkanal-Trading: Kauf beim Ausbruch aus dem Kanal der letzten 55 Kerzen" },
+  { title: "Pullback im Trend (Swing)", type: "trend_pullback", params: { trend: 100, down_bars: 3, exit_ma: 5 }, idea: "Swing Trading: im Aufwärtstrend nach einem Rücksetzer kaufen" },
+  { title: "Price Action: Inside Bar", type: "inside_bar", params: { exit_ma: 20 }, idea: "Price Action: Kauf, wenn der Kurs aus einer Innenstab-Kerze nach oben ausbricht" },
+  { title: "Range: Unterstützung kaufen", type: "range_support", params: { lookback: 48, zone: 0.25, min_range_pct: 1.0, exit_frac: 0.8 }, idea: "Unterstützungs-/Widerstandshandel: in der Seitwärtsphase an der Unterstützung kaufen" },
+  { title: "Mean Reversion: Bollinger", type: "bollinger_reversion", params: { period: 20, num_std: 2.0 }, idea: "Mean Reversion: Kauf unter dem unteren Bollinger-Band, Ausstieg an der Mitte" },
+];
+
+export function playbookCandidates() {
+  return PLAYBOOK.map(({ title, type, params, idea }) => ({ ...buildStrategy({ type, params }).toSpec(), source: "playbook", title, rationale: idea }));
+}
 
 export function defaultCandidates() {
   return DEFAULT_SPECS.map(([type, params]) => {

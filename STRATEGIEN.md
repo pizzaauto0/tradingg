@@ -32,6 +32,7 @@ Varianten mit `rr=1.0` zielen auf eine höhere Trefferquote.
 | `breakout` | Ausbruch über das Hoch der letzten N Kerzen; Ausstieg unter dem Tief der letzten M Kerzen (Donchian). | Richard Donchian / Turtle-Trader (Dennis & Eckhardt) | uptrend | 2 |
 | `squeeze_breakout` | Bollinger-Bänder lagen innerhalb der Keltner-Kanäle (Squeeze) und öffnen sich mit Kurs über der Mitte. | John Carter, TTM Squeeze (Mastering the Trade) | uptrend, sideways | 1 |
 | `inside_bar` | Nach einer Innenstab-Kerze schließt der Kurs über dem Hoch der Mutterkerze; Ausstieg unter der EMA. | Price-Action-Muster Inside Bar (u. a. Al Brooks) | uptrend | 1 |
+| `range_support` | Kauf nahe der Unterkante einer Handelsspanne bei bullischer Kerze, Ausstieg im oberen Teil der Spanne. | Unterstützungs-/Widerstandshandel (trading.de) | sideways | 1 |
 | `session_breakout` | Spanne der ersten Handelsstunden (UTC) – Kauf beim ersten Ausbruch darüber, Ausstieg zur Schlussstunde oder unter der Spanne (z. B. London-Breakout). | Opening-Range-/London-Breakout (u. a. Toby Crabel, Day Trading with Short Term Price Patterns) | uptrend, downtrend, sideways | 1 |
 
 ### Mean Reversion (typisch hohe Trefferquote)

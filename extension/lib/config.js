@@ -36,7 +36,7 @@ export const DEFAULTS = {
   backtest: {
     minCandles: 1000, minTrades: 20, minReturnPct: 2.0, maxDrawdownPct: 15.0, minSharpe: 1.0,
     minWinRatePct: 55.0, minProfitFactor: 1.2, oosFraction: 0.3, minOosReturnPct: 0.0,
-    profile: "strict", // strict (Standard) | explore (gelockert, NUR Paper: Strategien sind dann nicht bewiesen)
+    profile: "strict", // strict (Standard) | explore (gelockert) | playbook (5 feste Strategien) – die beiden letzten NUR im Paper-Modus, Strategien dann nicht bewiesen
   },
   pipeline: { revalidateHours: 24, historyCandles: 3000, maxActiveStrategies: 5 },
   solana: {
@@ -69,8 +69,8 @@ export function mergeConfig(base, over) {
 export function validateConfig(c) {
   const fail = (msg) => { throw new Error(msg); };
   if (typeof c.liveTrading !== "boolean") fail("liveTrading muss true/false sein.");
-  if (!["strict", "explore"].includes(c.backtest.profile)) fail("Prüfmodus muss 'strict' oder 'explore' sein.");
-  if (c.liveTrading && c.backtest.profile === "explore") fail("Der Erkundungsmodus (gelockerte Prüfung) ist nur im Paper-Modus erlaubt – für Live gilt immer 'strict'.");
+  if (!["strict", "explore", "playbook"].includes(c.backtest.profile)) fail("Prüfmodus muss 'strict', 'explore' oder 'playbook' sein.");
+  if (c.liveTrading && c.backtest.profile !== "strict") fail("Erkundungs- und Playbook-Modus (ungeprüfte Strategien) sind nur im Paper-Modus erlaubt – für Live gilt immer 'strict'.");
   if (!Array.isArray(c.assets) || !c.assets.length || c.assets.some((a) => !Object.hasOwn(ASSETS, a))) {
     fail(`assets muss eine nicht leere Liste aus ${Object.keys(ASSETS).join(", ")} sein.`);
   }

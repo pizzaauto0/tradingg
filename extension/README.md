@@ -38,6 +38,18 @@ zugleich Gewinn, Sharpe ≥ 1 und Profit Factor ≥ 1,2 erreicht. Davon handeln 
 keinen Gewinn – mehr dazu und ein Ergebnis auf echten Daten in [STRATEGIEN.md](../STRATEGIEN.md).
 Forex gibt es nur im Python-Bot (Interactive Brokers), nicht in der Extension.
 
+## Playbook: 5 feste Strategien (nur Paper)
+
+Basierend auf der Strategie-Übersicht von trading.de (Trendkanal, Swing/Pullback, Price Action, Unterstützung/Widerstand, Mean Reversion). Im Strategien-Tab unter „Warum (nicht)?" auf **„Playbook: 5 feste Strategien (nur Paper)"** klicken. Alle 5 sind dann aktiv, ohne Backtest-Freigabe; der Bot wählt je Markt und Marktphase die mit dem besten Sharpe. Abwärtstrend = keine Position (nur Long). Nicht bewiesen profitabel, nur im Paper-Modus erlaubt.
+
+| Strategie | Typ |
+|---|---|
+| Trendkanal-Ausbruch | `breakout` 55/20 |
+| Pullback im Trend (Swing) | `trend_pullback` |
+| Price Action: Inside Bar | `inside_bar` |
+| Range: Unterstützung kaufen | `range_support` |
+| Mean Reversion: Bollinger | `bollinger_reversion` |
+
 ## Auf dem Handy: Steuerung per Telegram
 Die Extension läuft nur in einem Desktop-Browser (Chrome, Brave, Edge). Auf dem Handy bedienst du den Bot **per Telegram**:
 
