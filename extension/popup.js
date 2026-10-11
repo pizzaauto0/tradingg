@@ -34,6 +34,17 @@ const card = (title, ...kids) => h("div", { class: "card" }, h("h3", {}, title),
 const btn = (label, onclick, cls = "", disabled = false) => h("button", { class: `btn ${cls}`, onclick, disabled }, label);
 const ago = (iso) => (iso ? `${Math.round((Date.now() - Date.parse(iso)) / 60000)} min her` : "–");
 
+// Ergebnis von „Strategien neu prüfen“ als verständlicher Text
+function researchSummary(r) {
+  const parts = [`${r.approved} von ${r.tested} Tests bestanden${r.approved ? ` (${r.active} aktiv)` : ""}.`,
+    `Geladen: ${[...new Set(r.candles)].join(" / ")} Kerzen je Markt.`];
+  if (r.tested) parts.push(`${r.profitable} Tests mit Gewinn, ${r.highWin} mit Trefferquote ≥ 55 %.`);
+  if (!r.approved && r.topReasons.length) parts.push("Häufigste Gründe: " + r.topReasons.map((x) => `${x.label} (${x.count}×)`).join(", ") + ".");
+  if (r.problems?.length) parts.push("Probleme: " + r.problems.join("; "));
+  if (!r.approved) parts.push("Details: Tab „Strategien“ → „Warum (nicht)?“.");
+  return parts.join("\n");
+}
+
 // ---------------------------------------------------------------- Aktivität
 const mmss = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
 
@@ -89,7 +100,7 @@ function renderStatus() {
     state.lastError && row("Letzter Fehler", state.lastError, "bad"),
     h("div", { class: "btns" },
       state.enabled ? btn("Stoppen", () => act(() => call("stop"))) : btn("Bot starten", () => act(() => call("start")), "primary"),
-      btn("Strategien neu prüfen", () => act(async () => { const r = await call("research"); showError(""); alert(`${r.approved} von ${r.tested} Tests bestanden (${r.candles} Kerzen).`); })),
+      btn("Strategien neu prüfen", () => act(async () => { const r = await call("research"); showError(""); alert(researchSummary(r)); })),
       state.enabled && btn("Jetzt prüfen", () => act(() => call("tickNow"))),
     ),
     h("div", { class: "btns" }, btn("NOT-AUS: Position schließen & stoppen", () => act(() => call("kill")), "danger")),

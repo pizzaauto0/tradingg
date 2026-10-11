@@ -59,3 +59,14 @@ test("Prüfmodus wechseln verwirft alte Zulassungen und erzwingt Neuprüfung; Tr
   assert.equal(s.state.lastRefresh, null);
   assert.ok(strict >= 0);
 });
+
+test("Ergebnis von „Strategien neu prüfen“ nennt die häufigsten Gründe", async () => {
+  installFakeChrome();
+  const T0 = Math.floor(Date.now() / TF_MS) * TF_MS - 3 * TF_MS;
+  const world = { df: makeCandles(1500, T0, (i) => 100 + Math.sin(i / 5) * 0.2) }; // seitwärts, kaum Vorteil
+  await handle({ type: "saveConfig", patch: { assets: ["SOL"] } }, marketFetch(world));
+  const r = await handle({ type: "research" }, marketFetch(world));
+  assert.equal(r.approved, 0);
+  assert.ok(r.tested >= 30 && r.topReasons.length > 0 && r.topReasons[0].count > 0);
+  assert.deepEqual(r.candles, [1500]);
+});

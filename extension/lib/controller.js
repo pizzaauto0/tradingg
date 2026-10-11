@@ -7,6 +7,7 @@ import { researchAndBacktest } from "./pipeline.js";
 import { PaperBroker, SolanaWallet, generateKeypair, parseSecretKey } from "./solana.js";
 import { createVault, decryptVault, deleteVault, getUnlockedKey, hasVault, lock, unlock, vaultAddress } from "./vault.js";
 import { b58encode } from "./util.js";
+import { summarizeFailures } from "./diagnose.js";
 
 let current = null; // laufender Durchlauf (Promise) – es läuft nie mehr als einer gleichzeitig
 export async function whenIdle() { while (current) await current; }
@@ -160,7 +161,9 @@ export async function handle(msg, fetchFn = fetch) {
       const st = await loadState(cfg);
       Object.assign(st, { approved: res.approved, report: res.report, lastRefresh: new Date().toISOString() });
       await setLocal(stateKey(cfg), st);
-      return { approved: res.approved.length, tested: res.report.length, candles: res.candles, problems: res.problems };
+      const d = summarizeFailures(res.report);
+      return { approved: res.approved.length, active: res.approved.filter((a) => a.active).length, tested: res.report.length, candles: res.candles,
+        problems: res.problems, topReasons: d.byReason.slice(0, 3), profitable: d.profitable, highWin: d.highWin };
     }
     case "balances": {
       const address = await vaultAddress();
