@@ -1,5 +1,5 @@
 // Service Worker: führt alle 30 Sekunden einen Bot-Durchlauf aus und beantwortet Anfragen des Popups.
-import { handle, runTick, loadConfig, loadState } from "./lib/controller.js";
+import { handle, runTick, pollTelegram, loadConfig, loadState } from "./lib/controller.js";
 
 async function ensureAlarm() {
   if (!(await chrome.alarms.get("tick"))) chrome.alarms.create("tick", { periodInMinutes: 0.5 });
@@ -20,6 +20,7 @@ ensureAlarm();
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name !== "tick") return;
+  await pollTelegram();
   await runTick();
   await updateBadge();
 });

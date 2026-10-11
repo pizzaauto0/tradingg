@@ -8,6 +8,7 @@ import { PaperBroker, SolanaWallet, generateKeypair, parseSecretKey } from "./so
 import { createVault, decryptVault, deleteVault, getUnlockedKey, hasVault, lock, unlock, vaultAddress } from "./vault.js";
 import { b58encode } from "./util.js";
 import { summarizeFailures } from "./diagnose.js";
+import { HELP, formatStatus, pollCommands } from "./telegram.js";
 
 let current = null; // laufender Durchlauf (Promise) – es läuft nie mehr als einer gleichzeitig
 export async function whenIdle() { while (current) await current; }
@@ -109,6 +110,35 @@ async function tickOnce({ fetchFn = fetch, now = new Date() } = {}) {
       await setLocal(stateKey(cfg), state);
       if (Date.now() - lastNoticeAt > 10 * 60_000) { lastNoticeAt = Date.now(); await makeNotifier(cfg, fetchFn)(`WARNUNG: Fehler im Durchlauf: ${e.message}`); }
     }
+  }
+}
+
+// ---- Steuerung per Telegram (alle 30 s vom Alarm aufgerufen) ----------------------------------------------------------
+export async function pollTelegram(fetchFn = fetch) {
+  try {
+    const cfg = await loadConfig();
+    if (!cfg.telegram.enabled) return;
+    await pollCommands(cfg, fetchFn, {
+      getOffset: () => getLocal("tgOffset", null),
+      setOffset: (n) => setLocal("tgOffset", n),
+      run: async (cmd, args) => {
+        try {
+          if (cmd === "/status") return formatStatus(await getStatus());
+          if (cmd === "/stop") { await handle({ type: "stop" }, fetchFn); return "Handel gestoppt. Offene Positionen bleiben mit ihren Stops bestehen. Starten geht nur im Browser."; }
+          if (cmd === "/kill") {
+            if (args[0]?.toLowerCase() !== "ja") return "NOT-AUS schließt ALLE Positionen und stoppt den Bot. Zum Bestätigen schreibe:\n/kill ja";
+            await handle({ type: "kill" }, fetchFn);
+            const left = Object.keys((await getStatus()).state.positions);
+            return left.length ? `NOT-AUS: nicht geschlossen: ${left.join(", ")} – bitte im Browser/Wallet prüfen!` : "NOT-AUS ausgeführt: keine offene Position, Bot gestoppt.";
+          }
+          return HELP; // /help, /start (Telegram-Standard) und alles Unbekannte
+        } catch (e) {
+          return `Fehler: ${e.message}`;
+        }
+      },
+    });
+  } catch (e) {
+    console.warn("Telegram-Abfrage fehlgeschlagen:", e.message);
   }
 }
 

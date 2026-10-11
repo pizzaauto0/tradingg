@@ -38,6 +38,30 @@ zugleich Gewinn, Sharpe ≥ 1 und Profit Factor ≥ 1,2 erreicht. Davon handeln 
 keinen Gewinn – mehr dazu und ein Ergebnis auf echten Daten in [STRATEGIEN.md](../STRATEGIEN.md).
 Forex gibt es nur im Python-Bot (Interactive Brokers), nicht in der Extension.
 
+## Auf dem Handy: Steuerung per Telegram
+Die Extension läuft nur in einem Desktop-Browser (Chrome, Brave, Edge). Auf dem Handy bedienst du den Bot **per Telegram**:
+
+1. In Telegram **@BotFather** öffnen → `/newbot` → Namen vergeben → den **Token** kopieren.
+2. Deinem neuen Bot eine Nachricht schreiben (z. B. „hallo“). Dann **@userinfobot** anschreiben: Er nennt deine **Chat-ID** (Zahl).
+3. Im Popup **⚙ Einstellungen** → „Telegram“: Aktiv anhaken, Token und Chat-ID eintragen, speichern.
+4. Ab jetzt meldet der Bot jeden Einstieg/Ausstieg und jede Warnung aufs Handy, und du kannst ihm schreiben:
+
+| Befehl | Wirkung |
+|---|---|
+| `/status` | Zustand, offene Positionen mit Gewinn/Verlust, Märkte, aktive Strategien |
+| `/stop` | Handel stoppen (offene Positionen bleiben mit ihren Stops) |
+| `/kill ja` | NOT-AUS: alle Positionen schließen und stoppen (ohne „ja“ fragt der Bot nach) |
+| `/help` | Befehlsliste |
+
+- **Sicherheit:** Befehle werden nur aus deinem eigenen Chat (deiner Chat-ID) ausgeführt, Nachrichten anderer Chats werden
+  ignoriert. Es gibt bewusst **kein „Starten“ und keine Einstellungen** per Telegram – nur Befehle, die das Risiko senken.
+  Nachrichten, die älter als 2 Minuten sind, und alles, was schon vor der ersten Abfrage bereitlag, wird nicht ausgeführt.
+- **Wichtig:** Der Browser auf dem PC muss laufen. Der Bot fragt Telegram alle 30 Sekunden ab, ein Befehl wirkt also mit bis
+  zu 30 Sekunden Verzögerung. Ist der PC aus oder im Standby, kommt weder Antwort noch Meldung – dann ist auch der
+  Stop-Loss nicht aktiv. Für echten Dauerbetrieb eignet sich der Python-Bot auf einem Server besser.
+- Der Token liegt unverschlüsselt im Browser-Speicher. Wer ihn hat, kann in deinem Namen Nachrichten senden, aber keine Befehle an deinen Bot geben (dafür ist deine Chat-ID nötig).
+- Ohne Extra-Einrichtung geht auch: **Chrome-Remote-Desktop** (App auf dem Handy), um den PC mit dem Popup direkt zu bedienen.
+
 ## „Der Bot lief die ganze Nacht, aber es gab keinen Trade“
 Das ist bei den strengen Standardwerten häufig und **kein Fehler**: Wenn keine Strategie den Backtest besteht, handelt der
 Bot absichtlich nicht. Der Tab „Strategien“ zeigt jetzt unter **„Warum (nicht)?“**, woran es scheiterte (z. B. „Sharpe
