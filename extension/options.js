@@ -24,6 +24,7 @@ const SECTIONS = [
     ["costs.slippagePct", "Slippage je Order (%)", "number"],
   ]],
   ["Backtest-Mindestwerte", [
+    ["backtest.profile", "Prüfmodus", ["strict", "explore"], "strict = strenge Mindestwerte (Standard, gilt für Live). explore = stark gelockert, NUR Paper: du siehst Trades, aber die Strategien sind nicht bewiesen und verlieren wahrscheinlich Geld. Wirkt auf alle Werte unten."],
     ["backtest.minTrades", "Min. Trades", "number"],
     ["backtest.minReturnPct", "Min. Rendite (%)", "number"],
     ["backtest.maxDrawdownPct", "Max. Drawdown (%)", "number"],

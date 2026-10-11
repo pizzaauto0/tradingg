@@ -38,6 +38,20 @@ zugleich Gewinn, Sharpe ≥ 1 und Profit Factor ≥ 1,2 erreicht. Davon handeln 
 keinen Gewinn – mehr dazu und ein Ergebnis auf echten Daten in [STRATEGIEN.md](../STRATEGIEN.md).
 Forex gibt es nur im Python-Bot (Interactive Brokers), nicht in der Extension.
 
+## „Der Bot lief die ganze Nacht, aber es gab keinen Trade“
+Das ist bei den strengen Standardwerten häufig und **kein Fehler**: Wenn keine Strategie den Backtest besteht, handelt der
+Bot absichtlich nicht. Der Tab „Strategien“ zeigt jetzt unter **„Warum (nicht)?“**, woran es scheiterte (z. B. „Sharpe
+zu niedrig 33×“), und die „knapp Gescheiterten“. Typische Gründe: Seitwärtsmarkt, und die Kosten pro Trade
+(Gebühr 0,10 % + Slippage 0,15 % je Seite ≈ 0,5 % Hin- und Rückweg) fressen bei 15-Minuten-Kerzen den Vorteil auf.
+
+Was du ändern kannst (Optionen):
+- **Zeitrahmen 1h oder 30m** statt 15m: weniger Trades, die Kosten fallen weniger ins Gewicht, und die 3000 Kerzen
+  Historie reichen weiter zurück (125 statt 31 Tage). Ob das für deine Märkte mehr Zulassungen ergibt, ist ungetestet.
+- **Prüfmodus „explore“ (nur Paper):** stark gelockerte Mindestwerte, damit du den Bot handeln siehst. Die Strategien sind
+  dann **nicht bewiesen**, jeder Trade ist im Log als „EXPERIMENTELL“ markiert, ein Banner erinnert dich daran, und der
+  Modus ist im Live-Modus technisch gesperrt. Beim Umschalten werden alte Zulassungen verworfen und neu geprüft.
+- Die Mindestwerte selbst lockern – das macht Trades häufiger, aber nicht besser.
+
 ## Mehrere Märkte gleichzeitig
 - Jeder Markt wird **einzeln** analysiert und gebacktestet; eine Strategie wird je Markt zugelassen oder abgelehnt
   (Tab „Strategien“ zeigt die Spalte „Markt“). Höchstens `maxOpenPositions` Positionen gleichzeitig (Standard 2) – das Limit,
@@ -74,7 +88,7 @@ Forex gibt es nur im Python-Bot (Interactive Brokers), nicht in der Extension.
 
 ## Entwicklung / Tests
 ```bash
-node --test extension/test/*.test.mjs                       # 25 Tests (Node 20+)
+node --test extension/test/*.test.mjs                       # 29 Tests (Node 20+)
 python extension/test/make_parity_fixture.py                # Python-Referenzwerte neu erzeugen
 python extension/test/make_sign_fixture.py                  # Signatur-Referenz (solders) neu erzeugen
 ```

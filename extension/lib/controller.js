@@ -25,6 +25,11 @@ export async function saveConfig(patch) {
     if (old.enabled || Object.keys(old.positions).length) throw new Error("Moduswechsel nur ohne laufenden Bot und ohne offene Position.");
   }
   await setLocal("config", next);
+  if (JSON.stringify(next.backtest) !== JSON.stringify(prev.backtest)) { // andere Prüfregeln -> alte Zulassungen verwerfen, beim nächsten Durchlauf neu prüfen
+    const st = await loadState(next);
+    Object.assign(st, { approved: [], report: [], lastRefresh: null });
+    await setLocal(stateKey(next), st);
+  }
   return next;
 }
 

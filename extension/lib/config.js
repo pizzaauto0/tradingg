@@ -25,6 +25,7 @@ export const DEFAULTS = {
   backtest: {
     minCandles: 1000, minTrades: 20, minReturnPct: 2.0, maxDrawdownPct: 15.0, minSharpe: 1.0,
     minWinRatePct: 55.0, minProfitFactor: 1.2, oosFraction: 0.3, minOosReturnPct: 0.0,
+    profile: "strict", // strict (Standard) | explore (gelockert, NUR Paper: Strategien sind dann nicht bewiesen)
   },
   pipeline: { revalidateHours: 24, historyCandles: 3000, maxActiveStrategies: 5 },
   solana: {
@@ -37,6 +38,10 @@ export const DEFAULTS = {
   llm: { enabled: false, model: "claude-sonnet-5-5", apiKey: "", maxTokens: 4000 },
   telegram: { enabled: false, token: "", chatId: "" },
 };
+
+// Gelockerte Mindestwerte des Erkundungsmodus (nur Paper): zeigt Trades, beweist aber nichts.
+export const EXPLORE_THRESHOLDS = { minTrades: 10, minReturnPct: 0, maxDrawdownPct: 25, minSharpe: 0, minWinRatePct: 45, minProfitFactor: 1.0, minOosReturnPct: -5 };
+export const effectiveThresholds = (bt) => (bt.profile === "explore" ? { ...bt, ...EXPLORE_THRESHOLDS } : bt);
 
 export const ALLOWED_TIMEFRAMES = ["5m", "15m", "30m", "1h"];
 
@@ -53,6 +58,8 @@ export function mergeConfig(base, over) {
 export function validateConfig(c) {
   const fail = (msg) => { throw new Error(msg); };
   if (typeof c.liveTrading !== "boolean") fail("liveTrading muss true/false sein.");
+  if (!["strict", "explore"].includes(c.backtest.profile)) fail("Prüfmodus muss 'strict' oder 'explore' sein.");
+  if (c.liveTrading && c.backtest.profile === "explore") fail("Der Erkundungsmodus (gelockerte Prüfung) ist nur im Paper-Modus erlaubt – für Live gilt immer 'strict'.");
   if (!Array.isArray(c.assets) || !c.assets.length || c.assets.some((a) => !Object.hasOwn(ASSETS, a))) {
     fail(`assets muss eine nicht leere Liste aus ${Object.keys(ASSETS).join(", ")} sein.`);
   }

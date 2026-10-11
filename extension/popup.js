@@ -1,4 +1,5 @@
 // Popup: Status, Strategien, Trades, Wallet. Alle Inhalte werden per textContent gesetzt (kein innerHTML).
+import { nearMisses, summarizeFailures } from "./lib/diagnose.js";
 const view = document.getElementById("view"), errorBox = document.getElementById("error");
 let tab = "status", status = null, balances = null, secretToShow = null, busy = false;
 
@@ -9,7 +10,7 @@ function h(tag, props = {}, ...kids) {
     else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
     else if (v !== false && v != null) e.setAttribute(k, v === true ? "" : v);
   }
-  for (const kid of kids.flat()) if (kid != null && kid !== false) e.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  for (const kid of kids.flat()) if (kid != null && kid !== false && kid !== true) e.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
   return e;
 }
 
@@ -77,6 +78,7 @@ function renderStatus() {
   if (state.killRequested) out.push(h("div", { class: "error" }, "Not-Aus aktiv: Position konnte nicht (vollständig) geschlossen werden. ",
     btn("Not-Aus aufheben", () => act(() => call("clearKill")))));
   if (live && state.locked) out.push(h("div", { class: "error" }, "Wallet gesperrt – Bot kann weder handeln noch Stops auslösen. Im Tab „Wallet“ entsperren."));
+  if (cfg.backtest.profile === "explore") out.push(h("div", { class: "warn" }, "ERKUNDUNGSMODUS (nur Paper): gelockerte Prüfung – Trades sind experimentell und nicht bewiesen."));
   if (live) out.push(h("div", { class: "warn" }, "LIVE-Modus: echte Orders mit echtem Geld. Der Stop-Loss wird nur vom Bot überwacht und wirkt nur, solange Browser und Wallet entsperrt laufen."));
 
   out.push(activityCard());
@@ -112,18 +114,33 @@ function renderStatus() {
 }
 
 // ------------------------------------------------------------ Strategien
+function diagnosisCard(report, approved) {
+  const d = summarizeFailures(report), cfg = status.cfg;
+  const lines = [h("div", {}, `${d.total} Tests: ${d.profitable} mit Gewinn, ${d.highWin} mit Trefferquote ≥ 55 % – ${approved.length} bestehen alle Mindestwerte.`)];
+  if (d.byReason.length) lines.push(h("div", { class: "muted" }, "Abgelehnt wegen: " + d.byReason.map((r) => `${r.label} (${r.count}×)`).join(" · ")));
+  const near = nearMisses(report, 4);
+  if (near.length) lines.push(h("div", { class: "decisions" }, h("strong", {}, "Knapp gescheitert:"), ...near.map((r) =>
+    h("div", {}, `${(r.symbol || "").split("/")[0]} ${r.strategy.split("(")[0]}: ${r.failures.join("; ")}`))));
+  if (!approved.length) lines.push(h("div", { class: "hint" }, cfg.backtest.profile === "explore"
+    ? "Auch mit gelockerten Werten besteht nichts – der Markt bietet aktuell keine Strategie mit Vorteil."
+    : "Mit den strengen Standardwerten besteht nichts. Das ist bei ruhigen oder seitwärts laufenden Märkten und hohen Handelskosten normal. Mehr Optionen: Einstellungen → Prüfmodus / Zeitrahmen."));
+  return card("Warum (nicht)?", ...lines);
+}
+
 function renderStrategies() {
   const { report, approved } = status.state;
   if (!report.length) return [h("p", { class: "muted" }, "Noch keine Backtests. Bot starten oder „Strategien neu prüfen“."),
     btn("Strategien neu prüfen", () => act(() => call("research")), "primary")];
   const rows = [...report].sort((a, b) => (!!b.active - !!a.active) || (b.approved - a.approved) || (b.metrics.sharpe - a.metrics.sharpe));
   return [
+    status.cfg.backtest.profile === "explore" && h("div", { class: "warn" }, "ERKUNDUNGSMODUS (nur Paper): gelockerte Mindestwerte. Zugelassene Strategien sind NICHT bewiesen – Trades dienen nur zum Ausprobieren."),
+    diagnosisCard(report, approved),
     h("p", { class: "muted" }, `★ ${approved.filter((a) => a.active).length} aktiv · ✔ ${approved.filter((a) => !a.active).length} Reserve · ✘ ${report.length - approved.length} abgelehnt (von ${report.length} Tests). Mindest-Trefferquote ${status.cfg.backtest.minWinRatePct} %.`),
-    h("table", {}, h("thead", {}, h("tr", {}, ...["Markt", "Strategie", "Rend.%", "DD%", "Sharpe", "Tr.%", "n"].map((t) => h("th", {}, t)))),
+    h("div", { class: "tablewrap" }, h("table", {}, h("thead", {}, h("tr", {}, ...["Markt", "Strategie", "Rend.%", "DD%", "Sharpe", "Tr.%", "n"].map((t) => h("th", {}, t)))),
       h("tbody", {}, ...rows.map((r) => h("tr", { title: r.failures.join("; ") },
         h("td", {}, (r.symbol || "").split("/")[0]), h("td", { class: r.active ? "ok strong" : r.approved ? "" : "muted" }, (r.active ? "★ " : r.approved ? "✔ " : "✘ ") + r.strategy + (r.source === "llm" ? " (LLM)" : "")),
         h("td", {}, fmt(r.metrics.return_pct)), h("td", {}, fmt(r.metrics.max_drawdown_pct)), h("td", {}, fmt(r.metrics.sharpe)),
-        h("td", {}, fmt(r.metrics.win_rate_pct, 0)), h("td", {}, r.metrics.trades))))),
+        h("td", {}, fmt(r.metrics.win_rate_pct, 0)), h("td", {}, r.metrics.trades)))))),
     h("p", { class: "hint" }, "Mauszeiger über eine Zeile zeigt, warum eine Strategie abgelehnt wurde."),
   ];
 }
@@ -181,7 +198,7 @@ function draw() {
   const pill = document.getElementById("mode");
   pill.textContent = status.cfg.liveTrading ? "LIVE" : "PAPER";
   pill.className = `pill ${status.cfg.liveTrading ? "live" : ""}`;
-  view.replaceChildren(...RENDER[tab]());
+  view.replaceChildren(...RENDER[tab]().filter(Boolean));
 }
 
 async function refresh() {

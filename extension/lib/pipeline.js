@@ -4,7 +4,7 @@ import { buildStrategy } from "./strategies.js";
 import { checkThresholds, runBacktest } from "./backtest.js";
 import { collectCandidates } from "./research.js";
 import { fetchHistory } from "./data.js";
-import { symbolOf } from "./config.js";
+import { effectiveThresholds, symbolOf } from "./config.js";
 
 export async function researchAndBacktest(cfg, fetchFn = fetch, histories = null) {
   const frames = {}, problems = [];
@@ -31,11 +31,12 @@ export async function researchAndBacktest(cfg, fetchFn = fetch, histories = null
     try { strategy = buildStrategy(spec); } catch (e) { console.warn("Kandidat übersprungen:", e.message); continue; }
     for (const [symbol, df] of Object.entries(frames)) {
       const result = runBacktest(cfg, df, strategy);
-      const { ok, failures } = checkThresholds(result.metrics, cfg.backtest);
+      const { ok, failures } = checkThresholds(result.metrics, effectiveThresholds(cfg.backtest));
       report.push({ symbol, strategy: strategy.name, source: spec.source || "", approved: ok, failures, metrics: result.metrics });
       if (ok) {
         approved.push({ symbol, timeframe: cfg.timeframe, spec: strategy.toSpec(), name: strategy.name,
-          source: spec.source || "", rationale: spec.rationale || "", metrics: result.metrics });
+          source: spec.source || "", rationale: spec.rationale || "", metrics: result.metrics,
+          explore: cfg.backtest.profile === "explore" });
       }
     }
   }
