@@ -221,7 +221,7 @@ test("Ein ausgefallener Markt stoppt die anderen nicht", async () => {
   await runTick({ fetchFn: f, now: at(world.dfs["SOL/USD"].t.at(-1)) });
   const s = await getStatus();
   assert.ok(s.state.activity["SOL/USD"].price > 0);
-  assert.match(s.state.activity["BTC/USD"].error, /404/);
+  assert.equal(s.state.activity["BTC/USD"], undefined, "Markt ohne Kursdaten wird übersprungen, nicht jede halbe Minute neu versucht");
 });
 
 test("Konfiguration: Assets und Token-Adressen werden geprüft", () => {

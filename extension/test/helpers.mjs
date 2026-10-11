@@ -21,26 +21,39 @@ export function makeCandles(n, lastT, f = (i) => 100 + 0.12 * i + Math.sin(i / 3
   return df;
 }
 
-// fetch-Attrappe für Kraken (Live-Kerzen) und Bitstamp (Historie). world.df = nur SOL, world.dfs = { "BTC/USD": df, … }.
-const KR = { SOLUSD: "SOL/USD", XBTUSD: "BTC/USD", ETHUSD: "ETH/USD" }, BS = { solusd: "SOL/USD", btcusd: "BTC/USD", ethusd: "ETH/USD" };
+// fetch-Attrappe für Kraken (Live-Kerzen), Bitstamp und Coinbase (Historie). world.df = nur SOL, world.dfs = { "BTC/USD": df, … }.
+// Märkte ohne Eintrag in world.dfs antworten wie unbekannte Paare (Kraken: Fehlermeldung, Bitstamp/Coinbase: 404).
+import { ASSETS } from "../lib/config.js";
+const bySource = (key) => Object.fromEntries(Object.values(ASSETS).filter((a) => a[key]).map((a) => [a[key], a.symbol]));
+const KR = bySource("kraken"), BS = bySource("bitstamp"), CB = bySource("coinbase");
 export function marketFetch(world) {
   const json = (b) => ({ ok: true, status: 200, json: async () => b, text: async () => JSON.stringify(b) });
+  const notFound = { ok: false, status: 404, json: async () => ({}), text: async () => "" };
   const frame = (sym) => (world.dfs ? world.dfs[sym] : sym === "SOL/USD" ? world.df : undefined);
+  world.calls = world.calls || [];
   return async (url) => {
     const u = new URL(url);
+    world.calls.push(u.host + u.pathname);
     if (u.host === "api.kraken.com") {
-      const df = frame(KR[u.searchParams.get("pair")]);
-      if (!df) return { ok: false, status: 404, json: async () => ({}), text: async () => "" };
+      const pair = u.searchParams.get("pair"), df = frame(KR[pair]);
+      if (!df) return json({ error: ["EQuery:Unknown asset pair"], result: {} });
       const n = df.t.length, from = Math.max(0, n - 720);
       const rows = df.t.slice(from).map((t, k) => { const i = from + k; return [t / 1000, String(df.open[i]), String(df.high[i]), String(df.low[i]), String(df.close[i]), "0", String(df.volume[i]), 1]; });
-      return json({ error: [], result: { [u.searchParams.get("pair")]: rows, last: 0 } });
+      return json({ error: [], result: { [pair]: rows, last: 0 } });
     }
     if (u.host === "www.bitstamp.net") {
       const df = frame(BS[u.pathname.split("/")[4]]);
-      if (!df) return { ok: false, status: 404, json: async () => ({}), text: async () => "" };
+      if (!df) return notFound;
       const start = +u.searchParams.get("start") * 1000, end = +u.searchParams.get("end") * 1000, ohlc = [];
       for (let i = 0; i < df.t.length; i++) if (df.t[i] >= start && df.t[i] <= end) ohlc.push({ timestamp: String(df.t[i] / 1000), open: String(df.open[i]), high: String(df.high[i]), low: String(df.low[i]), close: String(df.close[i]), volume: String(df.volume[i]) });
       return json({ data: { pair: "x", ohlc: ohlc.slice(-1000) } });
+    }
+    if (u.host === "api.exchange.coinbase.com") {
+      const df = frame(CB[u.pathname.split("/")[2]]);
+      if (!df) return notFound;
+      const start = Date.parse(u.searchParams.get("start")), end = Date.parse(u.searchParams.get("end")), rows = [];
+      for (let i = df.t.length - 1; i >= 0 && rows.length < 300; i--) if (df.t[i] >= start && df.t[i] < end) rows.push([df.t[i] / 1000, df.low[i], df.high[i], df.open[i], df.close[i], df.volume[i]]);
+      return json(rows);
     }
     throw new Error(`unerwartete URL ${url}`);
   };

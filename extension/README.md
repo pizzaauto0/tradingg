@@ -54,6 +54,23 @@ Was du ändern kannst (Optionen):
   Modus ist im Live-Modus technisch gesperrt. Beim Umschalten werden alte Zulassungen verworfen und neu geprüft.
 - Die Mindestwerte selbst lockern – das macht Trades häufiger, aber nicht besser.
 
+## Markt-Scan: viele Märkte, der Bot entscheidet
+Der Bot scannt **11 Märkte** (SOL, BTC, ETH, JUP, JTO, PYTH, RAY, RENDER, HNT, ORCA, W – nur liquide Hauptwerte, keine
+Memecoins), testet jede der 33 Strategie-Varianten an jedem Markt (rund 360 Tests, dauert wenige Sekunden) und aktiviert
+automatisch die **5 besten** (je Strategietyp und Markt höchstens eine). Das wiederholt er alle 24 Stunden und tauscht
+die aktiven Strategien selbst aus. Ein Klick auf **„Alle 11 Märkte scannen & besten 5 aktivieren“** im Tab „Strategien“
+startet den Scan sofort.
+
+- **Kursdaten:** Live von Kraken, Historie von Bitstamp, Coinbase oder Kraken (die erste Quelle mit genug Kerzen). Märkte,
+  die dort nicht (unter diesem Namen) gelistet sind, werden **übersprungen und unter „Probleme“ gemeldet**. Börsensymbole und
+  Token-Adressen der neuen Märkte stammen aus meinem Gedächtnis und sind nicht verifiziert – welche Märkte tatsächlich laufen,
+  zeigt dir der erste Scan.
+- **Je mehr Tests, desto mehr Zufallstreffer:** Bei 360 Tests besteht allein durch Glück die eine oder andere Strategie.
+  Deshalb muss jede zugelassene Strategie auch auf den zuletzt ungesehenen 30 % der Daten im Plus liegen, und die Auswahl wird
+  täglich neu geprüft. Ein Garant für künftige Gewinne ist das nicht.
+- Thin liquidity: Kleinere Token haben auf Solana oft wenig Handelstiefe. Der Bot bricht Swaps bei > 1 % Preisabweichung oder
+  zu hoher Preisauswirkung ab; das kann dazu führen, dass Signale nicht ausgeführt werden.
+
 ## Mehrere Märkte gleichzeitig
 - Jeder Markt wird **einzeln** analysiert und gebacktestet; eine Strategie wird je Markt zugelassen oder abgelehnt
   (Tab „Strategien“ zeigt die Spalte „Markt“). Höchstens `maxOpenPositions` Positionen gleichzeitig (Standard 2) – das Limit,

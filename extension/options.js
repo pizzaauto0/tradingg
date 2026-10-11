@@ -1,12 +1,12 @@
 // Einstellungsseite: erzeugt das Formular aus einer Feldliste; Werte werden validiert (controller.saveConfig).
+import { ASSETS } from "./lib/config.js";
 const form = document.getElementById("form"), errorBox = document.getElementById("error");
 
 // [Pfad, Beschriftung, Typ, Hinweis]
 const SECTIONS = [
+  ["Märkte (alle werden gescannt, gehandelt wird nur, was den Backtest besteht)", Object.entries(ASSETS).map(([base, a]) =>
+    [`assets.${base}`, `${a.symbol}${base === "SOL" ? "" : " (Token auf Solana, oft dünnere Liquidität)"}`, "asset"])],
   ["Handel", [
-    ["assets.SOL", "SOL handeln", "asset"],
-    ["assets.BTC", "BTC handeln (Wrapped-Token auf Solana, dünnere Liquidität)", "asset"],
-    ["assets.ETH", "ETH handeln (Wrapped-Token auf Solana, dünnere Liquidität)", "asset"],
     ["timeframe", "Zeitrahmen", ["5m", "15m", "30m", "1h"]],
     ["capital.start", "Kapital (USD/USDC)", "number", "Paper: Startguthaben. Live: maximal eingesetztes USDC."],
   ]],

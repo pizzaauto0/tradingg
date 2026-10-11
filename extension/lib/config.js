@@ -1,20 +1,31 @@
 // Standard-Konfiguration (entspricht config.solana.yaml des Python-Bots) und Validierung.
 import { timeframeSeconds } from "./util.js";
 
-// Handelbare Assets (nur liquide Majors, keine Memecoins). mint = Token-Adresse auf Solana; die Nachkommastellen werden
-// zur Laufzeit per RPC gelesen. Die Adressen für BTC/ETH sind Wormhole-Wrapped-Token – bitte selbst gegen einen
-// Solana-Explorer prüfen (in den Einstellungen überschreibbar). Falsche Adressen fängt der Preisabgleich gegen die Börsenkurse ab.
+// Handelbare Märkte (nur liquide Hauptwerte, keine Memecoins). Zusammen mit USDC auf Solana über Jupiter handelbar.
+// mint = Token-Adresse; die Nachkommastellen liest der Bot von der Chain. Kursdaten: kraken (Live + Notfall-Historie),
+// bitstamp/coinbase (längere Historie, falls dort gelistet). Fehlt ein Markt bei einer Quelle, wird er im Scan übersprungen
+// und unter „Probleme“ gemeldet – nichts bricht. ACHTUNG: Die Token-Adressen und Börsen-Symbole stammen aus meinem
+// Gedächtnis und sind NICHT verifiziert; prüfe sie vor Live-Betrieb in einem Solana-Explorer (in den Einstellungen
+// überschreibbar). Falsche Adressen fängt der Preisabgleich gegen die Börsenkurse ab (kein Trade bei > 1 % Abweichung).
 export const ASSETS = {
-  SOL: { symbol: "SOL/USD", kraken: "SOLUSD", bitstamp: "solusd", mint: "So11111111111111111111111111111111111111112" },
-  BTC: { symbol: "BTC/USD", kraken: "XBTUSD", bitstamp: "btcusd", mint: "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh" },
-  ETH: { symbol: "ETH/USD", kraken: "ETHUSD", bitstamp: "ethusd", mint: "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs" },
+  SOL: { symbol: "SOL/USD", kraken: "SOLUSD", bitstamp: "solusd", coinbase: "SOL-USD", mint: "So11111111111111111111111111111111111111112" },
+  BTC: { symbol: "BTC/USD", kraken: "XBTUSD", bitstamp: "btcusd", coinbase: "BTC-USD", mint: "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh" },
+  ETH: { symbol: "ETH/USD", kraken: "ETHUSD", bitstamp: "ethusd", coinbase: "ETH-USD", mint: "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs" },
+  JUP: { symbol: "JUP/USD", kraken: "JUPUSD", coinbase: "JUP-USD", mint: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN" },
+  JTO: { symbol: "JTO/USD", kraken: "JTOUSD", coinbase: "JTO-USD", mint: "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL" },
+  PYTH: { symbol: "PYTH/USD", kraken: "PYTHUSD", coinbase: "PYTH-USD", mint: "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3" },
+  RAY: { symbol: "RAY/USD", kraken: "RAYUSD", coinbase: "RAY-USD", mint: "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R" },
+  RENDER: { symbol: "RENDER/USD", kraken: "RENDERUSD", coinbase: "RENDER-USD", mint: "rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof" },
+  HNT: { symbol: "HNT/USD", kraken: "HNTUSD", coinbase: "HNT-USD", mint: "hntyVP6YFm1Hg25TN9WGLqM12b8TQmcknKrdu1oxWux" },
+  ORCA: { symbol: "ORCA/USD", kraken: "ORCAUSD", coinbase: "ORCA-USD", mint: "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE" },
+  W: { symbol: "W/USD", kraken: "WUSD", coinbase: "W-USD", mint: "85VBFQZC9TZkfaptBWjvUw7YbZjy52A6mjtPGjstQAmQ" },
 };
 export const symbolOf = (base) => ASSETS[base].symbol;
 export const baseOf = (symbol) => symbol.split("/")[0];
 
 export const DEFAULTS = {
   liveTrading: false, // Paper-Modus ist Standard
-  assets: ["SOL", "BTC", "ETH"], // gleichzeitig beobachtete/gehandelte Märkte
+  assets: Object.keys(ASSETS), // alle Märkte werden gescannt; gehandelt wird, was den Backtest besteht
   timeframe: "15m", // 5m | 15m | 30m | 1h
   capital: { start: 300 }, // Paper: Startguthaben. Live: maximal eingesetztes USDC
   risk: {

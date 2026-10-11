@@ -122,7 +122,7 @@ export async function getStatus() {
     cfg: safeCfg,
     state: { enabled: state.enabled, killRequested: !!state.killRequested, locked: !!state.locked, pending: state.pending || null,
       positions: state.positions, risk: state.risk || {}, paperCash: state.paper?.cash ?? null, approved: state.approved,
-      report: state.report, activity: state.activity || {}, decisions: (state.decisions || []).slice(-10).reverse(), status: state.status || null, lastRefresh: state.lastRefresh || null, lastTick: state.lastTick || null, lastError: state.lastError || null },
+      report: state.report, problems: state.problems || [], activity: state.activity || {}, decisions: (state.decisions || []).slice(-10).reverse(), status: state.status || null, lastRefresh: state.lastRefresh || null, lastTick: state.lastTick || null, lastError: state.lastError || null },
     vault: { exists: await hasVault(), address: await vaultAddress(), unlocked: !!(await getUnlockedKey()) },
     trades: (await getLocal("trades", [])).slice(-50).reverse(),
     events: (await getLocal("eventLog", [])).slice(-30).reverse(),
@@ -159,11 +159,11 @@ export async function handle(msg, fetchFn = fetch) {
     case "research": {
       const res = await researchAndBacktest(cfg, fetchFn);
       const st = await loadState(cfg);
-      Object.assign(st, { approved: res.approved, report: res.report, lastRefresh: new Date().toISOString() });
+      Object.assign(st, { approved: res.approved, report: res.report, problems: res.problems || [], lastRefresh: new Date().toISOString() });
       await setLocal(stateKey(cfg), st);
       const d = summarizeFailures(res.report);
       return { approved: res.approved.length, active: res.approved.filter((a) => a.active).length, tested: res.report.length, candles: res.candles,
-        problems: res.problems, topReasons: d.byReason.slice(0, 3), profitable: d.profitable, highWin: d.highWin };
+        problems: res.problems, markets: [...new Set(res.report.map((r) => r.symbol))].length, topReasons: d.byReason.slice(0, 3), profitable: d.profitable, highWin: d.highWin };
     }
     case "balances": {
       const address = await vaultAddress();

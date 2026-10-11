@@ -11,6 +11,7 @@
   "host_permissions": [
     "https://api.kraken.com/*",
     "https://www.bitstamp.net/*",
+    "https://api.exchange.coinbase.com/*",
     "https://lite-api.jup.ag/*",
     "https://api.jup.ag/*",
     "https://api.mainnet-beta.solana.com/*",

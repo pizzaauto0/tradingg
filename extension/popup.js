@@ -1,5 +1,6 @@
 // Popup: Status, Strategien, Trades, Wallet. Alle Inhalte werden per textContent gesetzt (kein innerHTML).
 import { nearMisses, summarizeFailures } from "./lib/diagnose.js";
+import { ASSETS } from "./lib/config.js";
 const view = document.getElementById("view"), errorBox = document.getElementById("error");
 let tab = "status", status = null, balances = null, secretToShow = null, busy = false;
 
@@ -36,7 +37,7 @@ const ago = (iso) => (iso ? `${Math.round((Date.now() - Date.parse(iso)) / 60000
 
 // Ergebnis von „Strategien neu prüfen“ als verständlicher Text
 function researchSummary(r) {
-  const parts = [`${r.approved} von ${r.tested} Tests bestanden${r.approved ? ` (${r.active} aktiv)` : ""}.`,
+  const parts = [`${r.markets} Märkte gescannt: ${r.approved} von ${r.tested} Tests bestanden${r.approved ? ` (${r.active} aktiv)` : ""}.`,
     `Geladen: ${[...new Set(r.candles)].join(" / ")} Kerzen je Markt.`];
   if (r.tested) parts.push(`${r.profitable} Tests mit Gewinn, ${r.highWin} mit Trefferquote ≥ 55 %.`);
   if (!r.approved && r.topReasons.length) parts.push("Häufigste Gründe: " + r.topReasons.map((x) => `${x.label} (${x.count}×)`).join(", ") + ".");
@@ -132,9 +133,19 @@ function diagnosisCard(report, approved) {
   const near = nearMisses(report, 4);
   if (near.length) lines.push(h("div", { class: "decisions" }, h("strong", {}, "Knapp gescheitert:"), ...near.map((r) =>
     h("div", {}, `${(r.symbol || "").split("/")[0]} ${r.strategy.split("(")[0]}: ${r.failures.join("; ")}`))));
+  const problems = status.state.problems || [];
+  if (problems.length) lines.push(h("div", { class: "hint" }, `Keine Kursdaten für ${problems.length} Markt/Märkte (übersprungen): ` + problems.map((p) => p.split(":")[0]).join(", ")));
+  const testedMarkets = new Set(report.map((r) => r.symbol)).size;
+  if (testedMarkets * 33 > 100) lines.push(h("div", { class: "hint" }, `Hinweis: ${report.length} Tests an ${testedMarkets} Märkten – bei so vielen Tests bestehen einzelne Strategien auch durch Zufall. Deshalb zählt nur, was auch auf den zuletzt ungesehenen Daten im Plus liegt.`));
   if (!approved.length) lines.push(h("div", { class: "hint" }, cfg.backtest.profile === "explore"
     ? "Auch mit gelockerten Werten besteht nichts – der Markt bietet aktuell keine Strategie mit Vorteil."
     : "Mit den strengen Standardwerten besteht nichts. Das ist bei ruhigen oder seitwärts laufenden Märkten und hohen Handelskosten normal. Mehr Optionen: Einstellungen → Prüfmodus / Zeitrahmen."));
+  const allAssets = Object.keys(ASSETS);
+  if (cfg.assets.length < allAssets.length) lines.push(h("div", { class: "btns" },
+    btn(`Alle ${allAssets.length} Märkte scannen & besten 5 aktivieren`, () => act(async () => {
+      await call("saveConfig", { patch: { assets: allAssets } });
+      alert(researchSummary(await call("research")));
+    }), "primary")));
   if (!cfg.liveTrading && cfg.backtest.profile === "strict") lines.push(h("div", { class: "btns" },
     btn("Regeln lockern (nur Paper) & neu prüfen", () => act(async () => {
       if (!confirm("Gelockerte Regeln: Der Bot handelt dann auch mit Strategien, die die strengen Prüfungen NICHT bestehen (Backtest nur knapp im Plus, Trefferquote ab 35 %). Nur im Paper-Modus (Spielgeld). Die Trades sind nicht bewiesen und als EXPERIMENTELL markiert.\n\nFortfahren?")) return;

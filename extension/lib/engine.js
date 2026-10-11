@@ -44,7 +44,9 @@ export class Engine {
 
     // 1) Daten laden; ein ausgefallener Markt stoppt die anderen nicht
     const data = {};
-    for (const sym of this.symbols) {
+    // Märkte, für die der Scan keine Kursdaten fand, werden nicht jede halbe Minute erneut abgefragt (außer bei offener Position)
+    const noData = new Set((state.problems || []).map((p) => p.split(":")[0]));
+    for (const sym of this.symbols.filter((s) => !noData.has(s) || state.positions[s])) {
       try {
         const live = await this.fetchRecent(sym);
         const n = live.t.length, forming = live.t[n - 1] + tfMs > now.getTime();
@@ -233,6 +235,7 @@ export class Engine {
       const res = await this.refresher();
       this.state.approved = res.approved;
       this.state.report = res.report;
+      this.state.problems = res.problems || [];
       await this.notify(`Strategien neu geprüft: ${res.approved.length} zugelassen, ${res.approved.filter((a) => a.active).length} aktiv${res.problems?.length ? ` (Probleme: ${res.problems.join("; ")})` : ""}`);
     } catch (e) {
       await this.notify(`Neuprüfung der Strategien fehlgeschlagen: ${e.message}`);
