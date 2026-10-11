@@ -223,6 +223,8 @@ document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click
   if (status) draw();
 }));
 
+document.getElementById("settings").addEventListener("click", () => chrome.runtime.openOptionsPage());
+
 refresh();
 // Nicht neu zeichnen, solange der Nutzer in einem Passwortfeld tippt oder ein Schlüssel angezeigt wird.
 setInterval(() => { if (!busy && !secretToShow && !document.activeElement?.matches?.("input")) refresh(); }, 5000);
