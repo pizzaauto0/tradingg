@@ -225,6 +225,47 @@ export class Engine {
     await this.notify(`ENTRY ${sym} ${fill.amount.toFixed(5)} @ ${fill.price.toFixed(2)} | Stop ${stop.toFixed(2)} | ${strategy.name} | ${market.regime}`);
   }
 
+  // Testtrade (nur Paper): eröffnet sofort eine Position, ohne auf ein Strategie-Signal zu warten.
+  // Stop/Ziel/Größe folgen den normalen Risikoregeln; die Position wird danach wie jede andere verwaltet.
+  async testEntry(now = new Date()) {
+    if (this.broker.mode === "live") throw new Error("Testtrade ist nur im Paper-Modus erlaubt.");
+    if (this.state.pending) throw new Error("Unklarer Orderstatus – erst zurücksetzen.");
+    const [ok, why] = this.risk.canOpen(Object.keys(this.state.positions).length);
+    if (!ok) throw new Error(`Kein Einstieg möglich: ${why}`);
+    const noData = new Set((this.state.problems || []).map((p) => p.split(":")[0]));
+    let lastErr = "kein Markt verfügbar";
+    for (const sym of this.symbols.filter((s) => !this.state.positions[s] && !noData.has(s))) {
+      try {
+        const live = await this.fetchRecent(sym), closed = sliceFrame(live, 0, live.t.length - 1);
+        if (closed.t.length < 150) continue;
+        this.lastPrices[sym] = last(live.close);
+        this.broker.hintPrices?.(this.lastPrices);
+        const market = classifyMarket(closed);
+        const rec = (this.state.approved || []).filter((r) => r.symbol === sym && r.timeframe === this.cfg.timeframe && r.active !== false)
+          .sort((a, b) => (b.metrics?.sharpe ?? -9) - (a.metrics?.sharpe ?? -9))[0];
+        const strategy = buildStrategy(rec?.spec ?? { type: "breakout", params: { lookback: 55, exit_lookback: 20 } });
+        const price = last(live.close), atrValue = last(atr(closed, this.cfg.risk.atrPeriod));
+        const risk = { ...this.cfg.risk, atrStopMult: strategy.stopMult(this.cfg.risk.atrStopMult), takeProfitRr: strategy.rr(this.cfg.risk.takeProfitRr) };
+        const [stop, takeProfit] = stopAndTarget(price, atrValue, risk);
+        if (!(stop > 0)) continue;
+        const equity = await this.equity();
+        const amount = floorTo(positionSize(this.risk.sizingEquity(equity), await this.broker.cash(), price, stop, this.cfg.risk, this.cfg.costs), price > 1000 ? 6 : 5);
+        if (amount * price < MIN_NOTIONAL_USD) continue;
+        const fill = await this.broker.openLong(sym, amount, stop, price);
+        const reason = `TESTTRADE (manuell ausgelöst, kein Strategie-Signal, nur Paper). Stop ${stop.toFixed(2)}, Ziel ${takeProfit.toFixed(2)}; ` +
+          `Marktphase: ${summarize(market)}; wird danach nach den üblichen Regeln der Strategie ${strategy.name} verwaltet.`;
+        this.state.positions[sym] = { symbol: sym, amount: fill.amount, entryPrice: fill.price, stop, takeProfit, entryFee: fill.fee,
+          openedAt: now.toISOString(), strategySpec: strategy.toSpec(), strategyName: `Test · ${strategy.name}`, regime: market.regime, reason };
+        await this.save();
+        await this.logTrade({ ts: now.toISOString(), mode: this.broker.mode, symbol: sym, action: "ENTRY", price: fill.price, amount: fill.amount,
+          fee: fill.fee, pnl: null, strategy: `Test · ${strategy.name}`, regime: market.regime, reason, equity: await this.equity() });
+        await this.notify(`TESTTRADE ${sym} ${fill.amount.toFixed(5)} @ ${fill.price.toFixed(2)} | Stop ${stop.toFixed(2)} (Paper)`);
+        return sym;
+      } catch (e) { lastErr = `${sym}: ${e.message}`; }
+    }
+    throw new Error(`Testtrade nicht möglich (${lastErr}).`);
+  }
+
   // ---- Strategien neu prüfen ----
   async maybeRefresh(now) {
     const ageH = this.state.lastRefresh ? (now - Date.parse(this.state.lastRefresh)) / 3.6e6 : Infinity;

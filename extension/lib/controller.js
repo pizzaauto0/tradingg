@@ -174,6 +174,19 @@ export async function handle(msg, fetchFn = fetch) {
       runTick({ fetchFn }); // im Hintergrund, blockiert das Popup nicht
       return true;
     }
+    case "testTrade": {
+      if (cfg.liveTrading) throw new Error("Testtrade ist nur im Paper-Modus erlaubt.");
+      await whenIdle();
+      const state = await loadState(cfg);
+      const engine = new Engine({
+        cfg, state, broker: new PaperBroker(cfg, state), notify: makeNotifier(cfg, fetchFn),
+        fetchRecent: (symbol) => fetchRecent(cfg, symbol, fetchFn), logTrade: appendTrade,
+        save: () => setLocal(stateKey(cfg), state), refresher: async () => { throw new Error("nicht benötigt"); },
+      });
+      const sym = await engine.testEntry(new Date());
+      await setLocal(stateKey(cfg), state);
+      return sym;
+    }
     case "tickNow": await whenIdle(); await runTick({ fetchFn }); return true;
     case "stop": { const st = await loadState(cfg); st.enabled = false; await setLocal(stateKey(cfg), st); return true; }
     case "kill": {

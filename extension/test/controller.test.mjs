@@ -230,3 +230,17 @@ test("Konfiguration: Assets und Token-Adressen werden geprüft", () => {
   assert.throws(() => validateConfig(mergeConfig(DEFAULTS, { solana: { mints: { BTC: "kein-mint" } } })), /Token-Adresse/);
   validateConfig(mergeConfig(DEFAULTS, { solana: { mints: { BTC: "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh" } } }));
 });
+
+test("Testtrade (Paper): eröffnet sofort eine Position mit Stop; im Live-Modus abgelehnt", async () => {
+  const world = trendWorld(1500);
+  const f = await setupPaper(world);
+  const sym = await handle({ type: "testTrade" }, f);
+  assert.equal(sym, "SOL/USD");
+  const s = await getStatus();
+  const pos = s.state.positions["SOL/USD"];
+  assert.ok(pos && pos.stop < pos.entryPrice && pos.entryPrice < pos.takeProfit);
+  assert.ok(pos.amount * (pos.entryPrice - pos.stop) <= 300 * 0.01 * 1.0001 + 1e-9);
+  assert.match(s.trades[0].reason, /TESTTRADE/);
+  await assert.rejects(handle({ type: "testTrade" }, f), /Kein Einstieg|Testtrade/);
+  await handle({ type: "saveConfig", patch: { liveTrading: true } }).catch(() => {});
+});

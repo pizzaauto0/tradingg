@@ -104,6 +104,10 @@ function renderStatus() {
       state.enabled ? btn("Stoppen", () => act(() => call("stop"))) : btn("Bot starten", () => act(() => call("start")), "primary"),
       btn("Strategien neu prüfen", () => act(async () => { const r = await call("research"); showError(""); alert(researchSummary(r)); })),
       state.enabled && btn("Jetzt prüfen", () => act(() => call("tickNow"))),
+      !cfg.liveTrading && btn("Testtrade (Paper)", () => act(async () => {
+        if (!confirm("Eröffnet SOFORT eine kleine Paper-Position (Spielgeld) ohne Strategie-Signal, nur damit du den Ablauf siehst. Fortfahren?")) return;
+        const sym = await call("testTrade"); showError(""); alert(`Testtrade eröffnet: ${sym}. Siehe Positionen und Trades.`);
+      })),
     ),
     h("div", { class: "btns" }, btn("NOT-AUS: Position schließen & stoppen", () => act(() => call("kill")), "danger")),
   ));

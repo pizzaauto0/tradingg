@@ -50,6 +50,8 @@ Basierend auf der Strategie-Übersicht von trading.de (Trendkanal, Swing/Pullbac
 | Range: Unterstützung kaufen | `range_support` |
 | Mean Reversion: Bollinger | `bollinger_reversion` |
 
+**Testtrade:** Im Bot-Kasten gibt es im Paper-Modus den Button „Testtrade (Paper)". Er eröffnet sofort eine kleine Spielgeld-Position (normale Risikoregeln, Stop und Ziel) ohne Strategie-Signal, damit du den ganzen Ablauf siehst. Im Trade-Log steht „TESTTRADE". Im Live-Modus gesperrt.
+
 ## Auf dem Handy: Steuerung per Telegram
 Die Extension läuft nur in einem Desktop-Browser (Chrome, Brave, Edge). Auf dem Handy bedienst du den Bot **per Telegram**:
 
