@@ -14,3 +14,10 @@ Zum Testen ohne Internet: `--demo --limit 6` (Zufallsdaten, Ergebnisse bedeutung
 Bewertung je Strategie: Anteil der Märkte im Plus, Anteil mit Gewinn in **beiden Zeithälften** (Beständigkeit), Vergleich mit Kaufen-und-Halten, Median von Sharpe, Rendite, Trefferquote, Profitfaktor, Drawdown. Läufe mit zu wenigen Trades zählen nicht.
 
 Grenzen: nur Long (kein Leerverkauf), Yahoo-Daten (angepasste Kurse, bei Futures GC=F usw. durchlaufende Kontrakte), grobe Kostenannahmen je Klasse, 1 % Risiko je Trade (Renditen in % des Kontos sind deshalb klein). Viele Tests auf denselben Daten: Spitzenwerte einzelner Läufe sind teils Zufall – deshalb zählt die Beständigkeit über viele Märkte.
+
+## Märkte zu den Strategien auswählen
+
+```
+python survey/pick.py --interval 1d
+```
+Liest `alle_laeufe.csv` und schreibt `survey/out/1d/markt_auswahl.txt`: je Strategie die Märkte, auf denen sie in beiden Zeithälften Gewinn machte (Profitfaktor >= 1,2, genug Trades), plus eine Liste der Märkte, die zu den meisten Strategien passen. Hinweis: Märkte nachträglich nach den besten Zahlen auszusuchen überschätzt den Edge; deshalb zählt nur „robust" in beiden Hälften.
