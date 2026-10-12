@@ -167,7 +167,7 @@ function diagnosisCard(report, approved) {
     }), "primary")));
   if (!cfg.liveTrading && cfg.backtest.profile !== "final") lines.push(h("div", { class: "btns" },
     btn("Final-3: Tageskerzen, BTC/ETH/SOL/Gold (nur Paper)", () => act(async () => {
-      if (!confirm("Final-3 (Paper): Tageskerzen, Märkte BTC, ETH, SOL und Gold (PAXG). Der Bot nutzt fest 3 Strategien aus unserem Massen-Test (Connors RSI(2), Trend-Pullback, IBS) – Idee: Trend intakt + kurzer Rücksetzer → kaufen, mit Stop-Loss und doppeltem Ziel. Auf Tageskerzen gibt es nur wenige Trades pro Monat. Nicht als profitabel bewiesen.\n\nFortfahren?")) return;
+      if (!confirm("Final-3 (Paper): Tageskerzen, Märkte BTC, ETH, SOL und Gold (PAXG). Der Bot nutzt fest 3 Strategien aus unserem Massen-Test (Connors RSI(2), Video-Methode (Trend + Rücksetzer an der Linie), IBS) – Idee: Trend intakt + kurzer Rücksetzer → kaufen, mit Stop-Loss und doppeltem Ziel. Auf Tageskerzen gibt es nur wenige Trades pro Monat. Nicht als profitabel bewiesen.\n\nFortfahren?")) return;
       await call("saveConfig", { patch: { timeframe: "1d", assets: ["BTC", "ETH", "SOL", "PAXG"], backtest: { profile: "final" } } });
       alert(researchSummary(await call("research")));
     }), "primary")));
