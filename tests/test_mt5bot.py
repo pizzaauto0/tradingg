@@ -185,3 +185,14 @@ def test_divergence_needs_reference_and_waits_for_data():
     assert s.needs == ["XAGUSD"]
     df = pd.DataFrame(bars(np.linspace(100, 110, 300))).assign(time=lambda d: pd.to_datetime(d.time, unit="s", utc=True)).set_index("time")
     assert s.entry(df, None) is None and s.entry(df, {"XAGUSD": df.iloc[:50]}) is None
+
+
+def test_account_switch_resets_daily_baseline(tmp_path):
+    mt5 = FakeMT5({"XAUUSD": bars(signal_series())})
+    r = Runner(mt5, cfg(), tmp_path)
+    r.connect()
+    assert r.day_check()
+    mt5.equity = 50_000.0                      # anderes Konto (auch mit anderer Nummer) mit ganz anderem Kapital
+    mt5.account_info = lambda: Acc(2, "Demo-Server", 50_000.0, 50_000.0, "USD", 0)
+    r2 = Runner(mt5, cfg(), tmp_path)          # gleicher Ordner: alte state-Datei mit Konto 1 und 10.000
+    assert r2.day_check() and r2.state["login"] == 2 and r2.state["start_equity"] == 50_000.0

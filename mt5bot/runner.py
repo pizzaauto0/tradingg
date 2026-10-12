@@ -248,8 +248,8 @@ class Runner:
         if acc is None:
             return False
         day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        if self.state.get("day") != day:
-            self.state.update(day=day, start_equity=acc.equity)
+        if self.state.get("day") != day or self.state.get("login") != acc.login:  # neuer Tag ODER anderes Konto: Tagesanfang neu setzen
+            self.state.update(day=day, start_equity=acc.equity, login=acc.login)
             self._save_state()
             self.halted_day = None
         start = self.state.get("start_equity", acc.equity)
