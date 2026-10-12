@@ -162,12 +162,15 @@ def main() -> int:
     ap.add_argument("--min-trades", type=int, default=0, help="Mindestzahl Trades je Lauf (0 = automatisch nach Zeitrahmen)")
     ap.add_argument("--config", default=str(ROOT / "config.yaml"))
     ap.add_argument("--demo", action="store_true", help="Zufallsdaten statt Download (nur Funktionstest, Ergebnisse bedeutungslos)")
+    ap.add_argument("--years", type=float, default=0, help="nur die letzten N Jahre testen (z. B. 2: Tageskerzen im selben Zeitraum wie der 1h-Test)")
     ap.add_argument("--limit", type=int, default=0, help="nur die ersten N Märkte (Test)")
     a = ap.parse_args()
-    out = Path(__file__).parent / "out" / (("demo_" if a.demo else "") + a.interval)
+    out = Path(__file__).parent / "out" / (("demo_" if a.demo else "") + a.interval + (f"_{a.years:g}y" if a.years else ""))
     out.mkdir(parents=True, exist_ok=True)
     cache = Path(__file__).parent / "cache"
     min_trades = a.min_trades or {"1d": 15, "1h": 30, "1wk": 8}[a.interval]
+    if a.years and a.years <= 3 and not a.min_trades:
+        min_trades = min(min_trades, 8)  # kurzer Zeitraum: weniger Trades möglich
 
     jobs, missing = [], []
     items = [(c, n, t) for c, m in UNIVERSE.items() for n, t in m.items()]
@@ -176,7 +179,9 @@ def main() -> int:
     for i, (cls, name, ticker) in enumerate(items, 1):
         print(f"[{i}/{len(items)}] Daten {name} ({ticker}) …", flush=True)
         df = demo_data(i, 2500 if a.interval == "1d" else 8000) if a.demo else download(ticker, a.interval, cache)
-        if df is None or len(df) < WARMUP + 200:
+        if df is not None and a.years:
+            df = df[df.index >= df.index[-1] - pd.Timedelta(days=int(365.25 * a.years))]
+        if df is None or len(df) < WARMUP + (200 if not a.years else 100):
             missing.append(f"{name} ({ticker}): {'keine Daten' if df is None else f'nur {len(df)} Kerzen'}")
             continue
         jobs.append((cls, name, df, a.interval, a.config))

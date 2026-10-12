@@ -28,7 +28,7 @@ def main() -> int:
     a = ap.parse_args()
     out = Path(__file__).parent / "out" / a.interval
     df = pd.read_csv(out / "alle_laeufe.csv")
-    mt = a.min_trades or {"1d": 15, "1h": 30, "1wk": 8}.get(a.interval, 15)
+    mt = a.min_trades or (8 if "y" in a.interval else {"1d": 15, "1h": 30, "1wk": 8}.get(a.interval, 15))
     df["robust"] = (df.trades >= mt) & (df.ret_h1 > 0) & (df.ret_h2 > 0) & (df.profitfaktor >= a.min_pf)
     L = [f"MARKT-AUSWAHL  {a.interval}  (robust = >= {mt} Trades, Gewinn in beiden Zeithälften, Profitfaktor >= {a.min_pf})", ""]
     table = {}
