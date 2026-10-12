@@ -81,3 +81,20 @@ test("Trefferquote-Set: 5 feste Strategien, alle aktiv, nur Paper", async () => 
   assert.deepEqual([...new Set(s.state.report.map((x) => x.title))].sort(), WINRATE5.map((p) => p.title).sort());
   assert.ok(s.state.approved.length >= 5 && s.state.approved.every((a) => a.active && a.explore));
 });
+
+test("Final-3: Tageskerzen, drei feste Strategien, Gold-Markt, nur Paper", async () => {
+  const { FINAL3, fixedCandidates } = await import("../lib/strategies.js");
+  const { ASSETS, ALLOWED_TIMEFRAMES } = await import("../lib/config.js");
+  const { minCandlesFor } = await import("../lib/data.js");
+  assert.equal(FINAL3.length, 3);
+  assert.equal(fixedCandidates("final").length, 3);
+  assert.ok(ALLOWED_TIMEFRAMES.includes("1d") && ASSETS.PAXG);
+  assert.equal(minCandlesFor({ timeframe: "1d", backtest: { minCandles: 1000 } }), 300);
+  assert.equal(minCandlesFor({ timeframe: "1h", backtest: { minCandles: 1000 } }), 1000);
+  const ok = mergeConfig(DEFAULTS, { timeframe: "1d", assets: ["BTC", "PAXG"], backtest: { profile: "final" } });
+  assert.equal(validateConfig(ok).timeframe, "1d");
+  assert.throws(() => validateConfig(mergeConfig(DEFAULTS, { liveTrading: true, backtest: { profile: "final" } })), /nur im Paper-Modus/);
+  const { SolanaWallet } = await import("../lib/solana.js");
+  const w = Object.create(SolanaWallet.prototype); w.sc = { mints: {} };
+  assert.throws(() => w.mintOf("PAXG/USD"), /keine Token-Adresse/);
+});

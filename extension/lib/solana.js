@@ -64,7 +64,9 @@ export class SolanaWallet {
 
   mintOf(symbol) {
     const base = baseOf(symbol);
-    return this.sc.mints?.[base] || ASSETS[base].mint;
+    const mint = this.sc.mints?.[base] || ASSETS[base].mint;
+    if (!mint) throw new Error(`Für ${base} ist keine Token-Adresse hinterlegt – Live-Handel nicht möglich (nur Paper).`);
+    return mint;
   }
 
   async decimals(mint) { // Nachkommastellen werden von der Chain gelesen, nicht angenommen

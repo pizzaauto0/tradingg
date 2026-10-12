@@ -12,8 +12,10 @@ const wave = (k, n = 3000) => makeCandles(n, T0, (i) => 100 * k + Math.sin(i / (
 test("Marktliste: Adressen sind gültiges Base58 und eindeutig, Kurssymbole eindeutig", () => {
   const re = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/, list = Object.values(ASSETS);
   assert.ok(list.length >= 10, "viele Märkte");
-  for (const a of list) assert.match(a.mint, re, a.symbol);
-  assert.equal(new Set(list.map((a) => a.mint)).size, list.length);
+  const withMint = list.filter((a) => a.mint); // Gold (PAXG) hat bewusst keine Adresse: nur Paper
+  assert.equal(list.length - withMint.length, 1);
+  for (const a of withMint) assert.match(a.mint, re, a.symbol);
+  assert.equal(new Set(withMint.map((a) => a.mint)).size, withMint.length);
   assert.equal(new Set(list.map((a) => a.kraken)).size, list.length);
   assert.deepEqual(DEFAULTS.assets, Object.keys(ASSETS), "Standard: alle Märkte scannen");
 });
@@ -31,14 +33,14 @@ test("Historie: Coinbase liefert genug Kerzen, wenn Bitstamp den Markt nicht ken
 test("Markt-Scan: Märkte ohne Daten werden gemeldet und übersprungen, aktiv werden höchstens 5", async () => {
   installFakeChrome();
   const dfs = { "SOL/USD": wave(1), "BTC/USD": wave(450), "ETH/USD": wave(28), "JUP/USD": wave(0.4), "PYTH/USD": wave(0.3), "RAY/USD": wave(3) };
-  const world = { dfs };                       // JTO, RENDER, HNT, ORCA, W fehlen -> "Probleme"
+  const world = { dfs };                       // JTO, RENDER, HNT, ORCA, W, PAXG fehlen -> "Probleme"
   const f = marketFetch(world);
   await handle({ type: "saveConfig", patch: { backtest: { profile: "explore" } } });   // gelockert, damit Zulassungen entstehen
   const t0 = Date.now();
   const r = await handle({ type: "research" }, f);
   assert.equal(r.markets, 6);
-  assert.equal(r.problems.length, 5);
-  assert.ok(r.problems.every((p) => /^(JTO|RENDER|HNT|ORCA|W)\/USD:/.test(p)), r.problems.join("|"));
+  assert.equal(r.problems.length, 6);
+  assert.ok(r.problems.every((p) => /^(JTO|RENDER|HNT|ORCA|W|PAXG)\/USD:/.test(p)), r.problems.join("|"));
   assert.ok(r.tested >= 6 * 30);
   assert.ok(r.active <= 5);
   assert.ok(Date.now() - t0 < 60_000, "Scan darf nicht ewig dauern");

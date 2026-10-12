@@ -52,6 +52,8 @@ Basierend auf der Strategie-Übersicht von trading.de (Trendkanal, Swing/Pullbac
 
 **Top 5 mit über 55 % Trefferquote:** Button daneben (ebenfalls Paper-only). Die fünf Varianten stammen aus einem Testlauf auf echten EUR/USD-15m-Kerzen (Trefferquote 56–68 %): Pullback im Trend, Stochastik, Connors RSI(2), Z-Score- und Bollinger-Rückkehr. Nur die ersten beiden waren dort auch im Plus; hohe Trefferquote allein heißt nicht Gewinn.
 
+**Final-3 (Tageskerzen):** Button „Final-3: Tageskerzen, BTC/ETH/SOL/Gold (nur Paper)". Stellt Zeitrahmen 1d, die Märkte BTC, ETH, SOL und Gold (PAXG) und 3 feste Strategien ein, die im Massen-Test auf Tageskerzen in beiden Zeiträumen (10 und 2 Jahre) beständig waren: Connors RSI(2), Trend-Pullback (200er Linie), IBS. Alle drei kaufen, wenn der Trend intakt ist und ein kurzer Rücksetzer kam (mit Stop-Loss und doppeltem Ziel). Nur wenige Trades pro Monat; Signale entstehen nur beim Tagesschluss (00:00 UTC). Gold läuft als PAXG-Token nur im Paper-Modus (keine verifizierte Solana-Adresse). Auf Stundenkerzen waren die Strategien im Test durchweg im Minus.
+
 **Testtrade:** Im Bot-Kasten gibt es im Paper-Modus den Button „Testtrade (Paper)". Er eröffnet sofort eine kleine Spielgeld-Position (normale Risikoregeln, Stop und Ziel) ohne Strategie-Signal, damit du den ganzen Ablauf siehst. Im Trade-Log steht „TESTTRADE". Im Live-Modus gesperrt.
 
 ## Dashboard (📈 im Popup)

@@ -3,7 +3,7 @@ import { classifyMarket } from "./indicators.js";
 import { buildStrategy } from "./strategies.js";
 import { checkThresholds, runBacktest } from "./backtest.js";
 import { collectCandidates } from "./research.js";
-import { fetchHistory } from "./data.js";
+import { fetchHistory, minCandlesFor } from "./data.js";
 import { effectiveThresholds, symbolOf } from "./config.js";
 import { fixedCandidates } from "./strategies.js";
 
@@ -13,7 +13,7 @@ export async function researchAndBacktest(cfg, fetchFn = fetch, histories = null
     const symbol = symbolOf(base);
     try {
       const df = histories?.[symbol] || (await fetchHistory(cfg, symbol, cfg.pipeline.historyCandles, fetchFn));
-      if (df.close.length < cfg.backtest.minCandles) throw new Error(`nur ${df.close.length} Kerzen (min. ${cfg.backtest.minCandles})`);
+      if (df.close.length < minCandlesFor(cfg)) throw new Error(`nur ${df.close.length} Kerzen (min. ${minCandlesFor(cfg)})`);
       frames[symbol] = df;
     } catch (e) {
       problems.push(`${symbol}: ${e.message}`);
@@ -24,7 +24,7 @@ export async function researchAndBacktest(cfg, fetchFn = fetch, histories = null
   const first = Object.keys(frames)[0];
   let state = null;
   try { state = classifyMarket(frames[first]); } catch { /* zu wenig Daten für den Kontext */ }
-  const playbook = cfg.backtest.profile === "playbook" || cfg.backtest.profile === "winrate"; // feste 5er-Sets
+  const playbook = cfg.backtest.profile === "playbook" || cfg.backtest.profile === "winrate" || cfg.backtest.profile === "final"; // feste 5er-Sets
   const candidates = playbook ? fixedCandidates(cfg.backtest.profile) : await collectCandidates(cfg, state, fetchFn);
 
   const approved = [], report = [];

@@ -7,7 +7,7 @@ const SECTIONS = [
   ["Märkte (alle werden gescannt, gehandelt wird nur, was den Backtest besteht)", Object.entries(ASSETS).map(([base, a]) =>
     [`assets.${base}`, `${a.symbol}${base === "SOL" ? "" : " (Token auf Solana, oft dünnere Liquidität)"}`, "asset"])],
   ["Handel", [
-    ["timeframe", "Zeitrahmen", ["5m", "15m", "30m", "1h"]],
+    ["timeframe", "Zeitrahmen", ["5m", "15m", "30m", "1h", "1d"]],
     ["capital.start", "Kapital (USD/USDC)", "number", "Paper: Startguthaben. Live: maximal eingesetztes USDC."],
   ]],
   ["Risikomanagement", [
@@ -24,7 +24,7 @@ const SECTIONS = [
     ["costs.slippagePct", "Slippage je Order (%)", "number"],
   ]],
   ["Backtest-Mindestwerte", [
-    ["backtest.profile", "Prüfmodus", ["strict", "explore", "playbook", "winrate"], "winrate = 5 feste Strategien mit Trefferquote über 55 % (Testlauf), nur Paper. strict = strenge Mindestwerte (Standard, gilt für Live). explore = stark gelockert. playbook = 5 feste Strategien von trading.de, der Bot wählt die passende (keine Mindestwerte). explore und playbook NUR im Paper-Modus: nicht bewiesen, Verluste wahrscheinlich."],
+    ["backtest.profile", "Prüfmodus", ["strict", "explore", "playbook", "winrate", "final"], "final = 3 feste Strategien aus dem Tageskerzen-Test (mit Zeitrahmen 1d), nur Paper. winrate = 5 feste Strategien mit Trefferquote über 55 % (Testlauf), nur Paper. strict = strenge Mindestwerte (Standard, gilt für Live). explore = stark gelockert. playbook = 5 feste Strategien von trading.de, der Bot wählt die passende (keine Mindestwerte). explore und playbook NUR im Paper-Modus: nicht bewiesen, Verluste wahrscheinlich."],
     ["backtest.minTrades", "Min. Trades", "number"],
     ["backtest.minReturnPct", "Min. Rendite (%)", "number"],
     ["backtest.maxDrawdownPct", "Max. Drawdown (%)", "number"],

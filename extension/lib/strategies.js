@@ -393,8 +393,16 @@ export const WINRATE5 = [
   { title: "Bollinger-Rückkehr (58 % Treffer)", type: "bollinger_reversion", params: { period: 20, num_std: 2.5, stop_mult: 3.0, rr: 1.0 }, idea: "Testlauf EUR/USD: Trefferquote 58,4 %, aber Rendite -4,8 %" },
 ];
 
+// FINAL3: Ergebnis des Massen-Tests auf Tageskerzen (42 Märkte, 10 und 2 Jahre) – alle drei folgen der Idee „Trend ist intakt + kurzer Rücksetzer
+// → kaufen, mit Stop-Loss und Ziel“. Beständig in beiden Zeiträumen, aber nur im Paper-Modus freigegeben und nicht als profitabel bewiesen.
+export const FINAL3 = [
+  { title: "Trend + Rücksetzer (Connors RSI 2)", type: "connors_rsi2", params: { trend: 200, rsi_period: 2, oversold: 10, exit_ma: 5 }, idea: "Tages-Test: 83 % der Märkte im Plus (10 J. und 2 J.), Trefferquote ~75 %" },
+  { title: "Trend-Pullback (200er Linie)", type: "trend_pullback", params: { trend: 200, down_bars: 3, exit_ma: 5 }, idea: "Methode aus dem Video: Trend nach oben, kurzer Rücksetzer zur Durchschnittslinie" },
+  { title: "IBS-Rücksetzer (Schlusskurs-Position)", type: "ibs_reversion", params: { low: 0.2, high: 0.8 }, idea: "Tages-Test: auf allen 42 Märkten getestet, ca. 23 Trades je Markt und Jahr" },
+];
+
 export function fixedCandidates(profile) {
-  const list = profile === "winrate" ? WINRATE5 : PLAYBOOK;
+  const list = profile === "winrate" ? WINRATE5 : profile === "final" ? FINAL3 : PLAYBOOK;
   return list.map(({ title, type, params, idea }) => ({ ...buildStrategy({ type, params }).toSpec(), source: profile, title, rationale: idea }));
 }
 

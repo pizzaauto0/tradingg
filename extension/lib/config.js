@@ -18,6 +18,7 @@ export const ASSETS = {
   RENDER: { symbol: "RENDER/USD", kraken: "RENDERUSD", coinbase: "RENDER-USD", mint: "rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof" },
   HNT: { symbol: "HNT/USD", kraken: "HNTUSD", coinbase: "HNT-USD", mint: "hntyVP6YFm1Hg25TN9WGLqM12b8TQmcknKrdu1oxWux" },
   ORCA: { symbol: "ORCA/USD", kraken: "ORCAUSD", coinbase: "ORCA-USD", mint: "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE" },
+  PAXG: { symbol: "PAXG/USD", kraken: "PAXGUSD", coinbase: "PAXG-USD", mint: "" }, // Gold-Token: nur Paper (keine verifizierte Solana-Adresse hinterlegt)
   W: { symbol: "W/USD", kraken: "WUSD", coinbase: "W-USD", mint: "85VBFQZC9TZkfaptBWjvUw7YbZjy52A6mjtPGjstQAmQ" },
 };
 export const symbolOf = (base) => ASSETS[base].symbol;
@@ -54,7 +55,7 @@ export const DEFAULTS = {
 export const EXPLORE_THRESHOLDS = { minTrades: 8, minReturnPct: 0, maxDrawdownPct: 25, minSharpe: 0, minWinRatePct: 35, minProfitFactor: 1.0, minOosReturnPct: -5 };
 export const effectiveThresholds = (bt) => (bt.profile === "explore" ? { ...bt, ...EXPLORE_THRESHOLDS } : bt);
 
-export const ALLOWED_TIMEFRAMES = ["5m", "15m", "30m", "1h"];
+export const ALLOWED_TIMEFRAMES = ["5m", "15m", "30m", "1h", "1d"];
 
 export function mergeConfig(base, over) {
   const out = Array.isArray(base) ? [...base] : { ...base };
@@ -69,7 +70,7 @@ export function mergeConfig(base, over) {
 export function validateConfig(c) {
   const fail = (msg) => { throw new Error(msg); };
   if (typeof c.liveTrading !== "boolean") fail("liveTrading muss true/false sein.");
-  if (!["strict", "explore", "playbook", "winrate"].includes(c.backtest.profile)) fail("Prüfmodus muss 'strict', 'explore', 'playbook' oder 'winrate' sein.");
+  if (!["strict", "explore", "playbook", "winrate", "final"].includes(c.backtest.profile)) fail("Prüfmodus muss 'strict', 'explore', 'playbook', 'winrate' oder 'final' sein.");
   if (c.liveTrading && c.backtest.profile !== "strict") fail("Erkundungs- und Playbook-Modus (ungeprüfte Strategien) sind nur im Paper-Modus erlaubt – für Live gilt immer 'strict'.");
   if (!Array.isArray(c.assets) || !c.assets.length || c.assets.some((a) => !Object.hasOwn(ASSETS, a))) {
     fail(`assets muss eine nicht leere Liste aus ${Object.keys(ASSETS).join(", ")} sein.`);

@@ -3,7 +3,10 @@
 import { sleep, timeframeSeconds } from "./util.js";
 import { ASSETS, baseOf } from "./config.js";
 
-const KRAKEN_INTERVAL = { "5m": 5, "15m": 15, "30m": 30, "1h": 60 };
+const KRAKEN_INTERVAL = { "5m": 5, "15m": 15, "30m": 30, "1h": 60, "1d": 1440 };
+
+// Tageskerzen: Kraken liefert nur 720 davon (ca. 2 Jahre) – dafür reichen 300 für einen Backtest
+export const minCandlesFor = (cfg) => (cfg.timeframe === "1d" ? Math.min(cfg.backtest.minCandles, 300) : cfg.backtest.minCandles);
 
 export const emptyFrame = () => ({ t: [], open: [], high: [], low: [], close: [], volume: [] });
 
@@ -51,7 +54,7 @@ async function bitstampHistory(cfg, symbol, n, fetchFn) {
 async function coinbaseHistory(cfg, symbol, n, fetchFn) {
   const product = ASSETS[baseOf(symbol)].coinbase, step = timeframeSeconds(cfg.timeframe);
   if (!product) throw new Error("nicht bei Coinbase hinterlegt");
-  if (![60, 300, 900, 3600].includes(step)) throw new Error("Zeitrahmen bei Coinbase nicht verfügbar");
+  if (![60, 300, 900, 3600, 86400].includes(step)) throw new Error("Zeitrahmen bei Coinbase nicht verfügbar");
   let end = Math.floor(Date.now() / 1000), rows = [], empty = 0;
   while (rows.length < n && empty < 2) {
     const start = end - 300 * step;
@@ -83,7 +86,7 @@ export async function fetchHistory(cfg, symbol, n = cfg.pipeline.historyCandles,
     } catch (e) {
       errors.push(`${name}: ${e.message}`);
     }
-    if (df && df.close.length >= cfg.backtest.minCandles) break;
+    if (df && df.close.length >= minCandlesFor(cfg)) break;
   }
   if (!df) throw new Error(`keine Kursdaten (${errors.join("; ")})`);
   const tfMs = timeframeSeconds(cfg.timeframe) * 1000;
