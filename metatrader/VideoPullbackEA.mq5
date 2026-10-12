@@ -14,7 +14,6 @@
 //+------------------------------------------------------------------+
 #property copyright "Trading-Bot-Projekt"
 #property version   "1.00"
-#property strict
 
 #include <Trade\Trade.mqh>
 
@@ -204,7 +203,7 @@ void OnTick()
    double limit = -AccountInfoDouble(ACCOUNT_EQUITY) * MaxDailyLossPct / 100.0;
    bool dailyHalt = dailyPnL <= limit;
 
-   statusText = StringFormat("Trend steigt: %s | Rücksetzer an Linie: %s | Signal: %s | offen: %d | Tages-PnL: %.2f%s",
+   statusText = StringFormat("Trend steigt: %s | Ruecksetzer an Linie: %s | Signal: %s | offen: %d | Tages-PnL: %.2f%s",
                              rising ? "JA" : "nein", pullLong ? "JA" : "nein",
                              buySignal ? "KAUFEN" : (sellSignal ? "VERKAUFEN" : "keins"), open, dailyPnL,
                              dailyHalt ? " | TAGESLIMIT AKTIV" : "");
