@@ -23,6 +23,8 @@ HEARTBEAT_MINUTES = 15         # Lebenszeichen + Marktzustand im Log
 LOG_FILE = "mt5bot.log"
 JOURNAL_FILE = "mt5bot_journal.csv"
 STATE_FILE = "mt5bot_state.json"
+SNAPSHOT_FILE = "mt5bot_snapshot.json"   # Datenstand für die Oberfläche
+DASHBOARD_PORT = 8765                     # Oberfläche unter http://127.0.0.1:8765 (0 = aus); nur auf diesem PC erreichbar
 
 # Manche Broker nennen Symbole anders (z. B. GOLD statt XAUUSD): der Bot probiert diese Namen der Reihe nach.
 SYMBOL_ALIASES = {
@@ -42,6 +44,8 @@ PROFILES = [
         "markets": {"XAUUSD": "H4", "XAGUSD": "H4", "XPTUSD": "H4"},
         "strategy": {"type": "ma_pullback", "params": {"ma_period": 50, "slope_bars": 10, "touch_pct": 0.5, "exit_pct": 3.0}},
         "allow_short": False, "risk_percent": 1.0, "atr_stop_mult": 2.0, "rr": 2.0,
+        "breakeven_at_r": None,   # z. B. 1.0: ab +1R Stop auf Einstand ziehen ("Trail: BE"); None = aus (so getestet)
+        "max_days": None,         # z. B. 40: Position nach 40 Tagen schließen (Zeit-Stopp); None = aus
     },
     {
         "name": "connors_d1", "enabled": False, "magic": 100102,

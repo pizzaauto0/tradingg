@@ -10,6 +10,14 @@ python -m mt5bot.run          (im Projektordner)   oder   mt5bot\start_bot.bat
 ```
 Vorher: MetaTrader 5 starten, **Demo-Konto** einloggen, oben „Algo-Handel" grün. Stoppen mit Strg+C (Stop-Loss/Take-Profit bleiben beim Broker).
 
+## Oberfläche
+Der Bot öffnet beim Start automatisch **http://127.0.0.1:8765** im Browser (nur auf diesem PC erreichbar, nur lesend):
+Kopfzeile mit Uhrzeit Deutschland/New York, Kapital, Tagesgewinn, letztem Durchlauf, nächster Kerze, Broker-Status;
+je offener Position eine Karte mit Kerzenchart, Einstieg, Stop, Ziel, 52-Wochen-Hoch, R-Vielfaches (Gewinn in Einheiten des
+Anfangsrisikos), Prozent, Tagen und MaxR (bestes R seit Einstieg); darunter der Zustand jedes Marktes. Aktualisiert alle 15 s.
+Optional je Profil: `breakeven_at_r` (Stop ab +xR auf Einstand, Anzeige „Trail: BE") und `max_days` (Zeit-Stopp).
+Einzeln starten (wenn der Bot schon läuft): `python -m mt5bot.dashboard`. Port ändern/abschalten: `DASHBOARD_PORT` in der Konfiguration.
+
 ## Profile (`mt5bot/config.py`, `enabled` ein-/ausschalten)
 | Profil | Strategie | Standard |
 |---|---|---|

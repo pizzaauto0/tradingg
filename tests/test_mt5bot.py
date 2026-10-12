@@ -196,3 +196,45 @@ def test_account_switch_resets_daily_baseline(tmp_path):
     mt5.account_info = lambda: Acc(2, "Demo-Server", 50_000.0, 50_000.0, "USD", 0)
     r2 = Runner(mt5, cfg(), tmp_path)          # gleicher Ordner: alte state-Datei mit Konto 1 und 10.000
     assert r2.day_check() and r2.state["login"] == 2 and r2.state["start_equity"] == 50_000.0
+
+
+def test_snapshot_breakeven_timestop_and_dashboard(tmp_path):
+    import json
+    import urllib.request
+    from datetime import datetime, timedelta, timezone
+
+    from mt5bot.dashboard import serve
+
+    c = cfg()
+    c.PROFILES[0].update(breakeven_at_r=1.0, max_days=40)
+    series = signal_series()
+    mt5 = FakeMT5({"XAUUSD": bars(series + [series[-1]] + [series[-1] + 30] * 3)})
+    r, mt5 = run_signal(tmp_path, mt5=mt5, c=c)
+    pos = mt5.positions[0]
+    entry, risk = pos.price_open, pos.price_open - pos.sl
+    r.write_snapshot()
+    snap = json.loads((tmp_path / "mt5bot_snapshot.json").read_text(encoding="utf-8"))
+    p = snap["positions"][0]
+    assert p["symbol"] == "XAUUSD" and p["profile"] == "video" and p["max_days"] == 40 and not p["breakeven"]
+    assert abs(p["r"] - (p["price"] - entry) / risk) < 1e-6 and len(p["candles"]["c"]) == 120
+    assert snap["account"]["demo"] and snap["markets"] and snap["next_bar"]
+
+    mt5.n += 1                                  # Kurs steigt um +30 (weit über 1R): Stop auf Einstand
+    r.step()
+    pos = mt5.positions[0]
+    assert pos.sl == entry
+    r.write_snapshot()
+    snap = json.loads((tmp_path / "mt5bot_snapshot.json").read_text(encoding="utf-8"))
+    assert snap["positions"][0]["breakeven"] and snap["positions"][0]["max_r"] > 1
+
+    url = serve(tmp_path, 0, open_browser=False)  # Port 0 = freier Port
+    assert url.startswith("http://127.0.0.1:")
+    html = urllib.request.urlopen(url).read().decode()
+    assert "OFFENE POSITIONEN" in html
+    api = json.loads(urllib.request.urlopen(url + "api/snapshot").read())
+    assert api["positions"][0]["symbol"] == "XAUUSD"
+
+    old = (datetime.now(timezone.utc) - timedelta(days=41)).isoformat()
+    r.state["trades"][str(pos.ticket)]["opened"] = old
+    r.manage_open()                             # Zeit-Stopp nach 40 Tagen
+    assert not mt5.positions

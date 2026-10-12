@@ -263,6 +263,142 @@ class Runner:
     def kill_requested(self) -> bool:
         return self._path(self.cfg.KILL_FILE).exists()
 
+    # ---------- offene Positionen: R-Vielfaches, Breakeven, Zeit-Stopp ----------
+    def profile_of(self, pos) -> dict | None:
+        return next((p for p in self.profiles if p["magic"] == pos.magic), None)
+
+    def _market_of(self, prof: dict, pos) -> str | None:
+        return next((n for n in prof["markets"] if self.symbols.get(n) == pos.symbol), None)
+
+    def _price(self, pos) -> float:
+        cur = getattr(pos, "price_current", 0) or 0
+        if cur:
+            return float(cur)
+        tick = self.mt5.symbol_info_tick(pos.symbol)
+        buy = pos.type == self.mt5.POSITION_TYPE_BUY
+        return float((tick.bid if buy else tick.ask) if tick else pos.price_open)
+
+    def track_positions(self, now: datetime | None = None) -> None:
+        """Merkt sich je Position Einstieg, Anfangs-Stop (= 1R), Eröffnungszeit und den besten Kurs seither."""
+        now = now or datetime.now(timezone.utc)
+        rec = self.state.setdefault("trades", {})
+        live = {str(p.ticket): p for p in self.positions()}
+        for t in [t for t in rec if t not in live]:
+            del rec[t]
+        for t, pos in live.items():
+            price = self._price(pos)
+            r = rec.get(t)
+            if r is None:
+                opened = getattr(pos, "time", 0)
+                rec[t] = r = {"entry": float(pos.price_open), "sl0": float(pos.sl), "best": price,
+                              "opened": datetime.fromtimestamp(opened, timezone.utc).isoformat() if opened else now.isoformat()}
+            if not r.get("sl0") and pos.sl:
+                r["sl0"] = float(pos.sl)
+            buy = pos.type == self.mt5.POSITION_TYPE_BUY
+            r["best"] = max(r["best"], price) if buy else min(r["best"], price)
+        self._save_state()
+
+    def r_values(self, pos) -> tuple[float | None, float | None]:
+        r = self.state.get("trades", {}).get(str(pos.ticket))
+        if not r or not r.get("sl0"):
+            return None, None
+        risk = abs(r["entry"] - r["sl0"])
+        if risk <= 0:
+            return None, None
+        sign = 1 if pos.type == self.mt5.POSITION_TYPE_BUY else -1
+        return sign * (self._price(pos) - r["entry"]) / risk, sign * (r["best"] - r["entry"]) / risk
+
+    def manage_open(self, now: datetime | None = None) -> None:
+        """Optional je Profil: Stop auf Einstand ziehen ab breakeven_at_r, Position nach max_days Tagen schließen."""
+        now = now or datetime.now(timezone.utc)
+        mt5 = self.mt5
+        for pos in self.positions():
+            prof = self.profile_of(pos)
+            rec = self.state.get("trades", {}).get(str(pos.ticket))
+            if not prof or not rec:
+                continue
+            if prof.get("max_days") and (now - datetime.fromisoformat(rec["opened"])).total_seconds() / 86400 >= prof["max_days"]:
+                self.close(pos, f"Zeit-Stopp nach {prof['max_days']} Tagen")
+                continue
+            be = prof.get("breakeven_at_r")
+            _, max_r = self.r_values(pos)
+            buy = pos.type == mt5.POSITION_TYPE_BUY
+            at_be = pos.sl >= rec["entry"] if buy else (0 < pos.sl <= rec["entry"])
+            if be and max_r is not None and max_r >= be and not at_be:
+                res = mt5.order_send({"action": mt5.TRADE_ACTION_SLTP, "symbol": pos.symbol, "position": pos.ticket,
+                                      "sl": rec["entry"], "tp": pos.tp, "magic": pos.magic})
+                ok = bool(res and res.retcode == mt5.TRADE_RETCODE_DONE)
+                log.info(f"{pos.symbol}: Stop auf Einstand {rec['entry']} {'gezogen' if ok else 'NICHT gesetzt'} (MaxR {max_r:.2f})")
+
+    # ---------- Datenstand für die Oberfläche ----------
+    def write_snapshot(self, error: str | None = None) -> None:
+        mt5, now = self.mt5, datetime.now(timezone.utc)
+        self.track_positions(now)  # auch eben erst eröffnete Positionen erfassen
+        acc = mt5.account_info()
+        positions = []
+        for pos in self.positions():
+            prof = self.profile_of(pos) or {}
+            name = self._market_of(prof, pos) if prof else None
+            tf = prof.get("markets", {}).get(name, "D1") if name else "D1"
+            df = self.closed_bars(name, tf) if name else None
+            rec = self.state.get("trades", {}).get(str(pos.ticket), {})
+            r_now, r_max = self.r_values(pos)
+            price = self._price(pos)
+            high52 = None
+            try:
+                d1 = mt5.copy_rates_from_pos(pos.symbol, self.tf["D1"], 0, 260)
+                if d1 is not None and len(d1):
+                    high52 = float(max(x["high"] for x in d1))
+            except Exception:  # nicht jeder Broker liefert genug Tageskerzen
+                high52 = None
+            tail = df.iloc[-120:] if df is not None else None
+            opened = rec.get("opened")
+            positions.append({
+                "ticket": pos.ticket, "symbol": pos.symbol, "profile": prof.get("name", "?"), "tf": tf,
+                "direction": "long" if pos.type == mt5.POSITION_TYPE_BUY else "short", "volume": pos.volume,
+                "entry": rec.get("entry", pos.price_open), "sl0": rec.get("sl0"), "sl": pos.sl, "tp": pos.tp, "price": price,
+                "profit": float(getattr(pos, "profit", 0.0)), "r": r_now, "max_r": r_max,
+                "days": (now - datetime.fromisoformat(opened)).total_seconds() / 86400 if opened else None,
+                "max_days": prof.get("max_days"), "breakeven": bool(rec and pos.sl and abs(pos.sl - rec.get("entry", -1)) < 1e-9),
+                "high52w": high52,
+                "candles": None if tail is None else {"t": [int(x.timestamp()) for x in tail.index], "o": tail.open.round(6).tolist(),
+                                                      "h": tail.high.round(6).tolist(), "l": tail.low.round(6).tolist(), "c": tail.close.round(6).tolist()},
+            })
+        if time.monotonic() - getattr(self, "_status_at", -1e9) > 300 or not hasattr(self, "_status"):
+            self._status = []
+            for prof in self.profiles:
+                for name, tf in prof["markets"].items():
+                    try:
+                        df = self.closed_bars(name, tf)
+                        extra = {r: self.closed_bars(r, tf) for r in prof["strat"].needs}
+                        text = "keine Daten" if df is None else prof["strat"].status(df, extra)
+                    except Exception as e:  # Anzeige darf den Bot nie stoppen
+                        text = f"Fehler: {e}"
+                    self._status.append({"profile": prof["name"], "symbol": name, "tf": tf, "status": text})
+            self._status_at = time.monotonic()
+        snap = {
+            "generated": now.isoformat(), "error": error, "poll_seconds": self.cfg.POLL_SECONDS,
+            "account": None if acc is None else {"login": acc.login, "server": acc.server, "equity": acc.equity, "balance": acc.balance,
+                                                  "currency": acc.currency, "demo": acc.trade_mode == mt5.ACCOUNT_TRADE_MODE_DEMO},
+            "start_equity": self.state.get("start_equity"), "halted": self.halted_day is not None, "kill": self.kill_requested(),
+            "max_positions": self.cfg.MAX_OPEN_POSITIONS, "profiles": [{"name": p["name"], "strategy": p["strat"].name} for p in self.profiles],
+            "next_bar": self._next_bar_time(), "positions": positions, "markets": self._status,
+        }
+        tmp = self._path(self.cfg.SNAPSHOT_FILE).with_suffix(".tmp")
+        tmp.write_text(json.dumps(snap, default=str), encoding="utf-8")
+        os.replace(tmp, self._path(self.cfg.SNAPSHOT_FILE))
+
+    TF_SECONDS = {"M1": 60, "M5": 300, "M15": 900, "M30": 1800, "H1": 3600, "H4": 14400, "D1": 86400, "W1": 604800}
+
+    def _next_bar_time(self) -> str | None:
+        """Wann die nächste Kerze schließt (frühester Zeitpunkt über alle Profile/Märkte) = nächste Entscheidung."""
+        times = []
+        for (pname, name), t in self.last_bar.items():
+            prof = next((p for p in self.profiles if p["name"] == pname), None)
+            if prof is not None and hasattr(t, "timestamp"):
+                times.append(t.timestamp() + 2 * self.TF_SECONDS[prof["markets"][name]])
+        return datetime.fromtimestamp(min(times), timezone.utc).isoformat() if times else None
+
     # ---------- ein Durchlauf ----------
     def step(self) -> None:
         if self.kill_requested():
@@ -271,6 +407,8 @@ class Runner:
             log.warning("KILL-SWITCH aktiv: keine neuen Trades. Datei löschen, um weiterzumachen.")
             return
         allowed = self.day_check()
+        self.track_positions()
+        self.manage_open()
         for prof in self.profiles:
             strat = prof["strat"]
             for name, tf in prof["markets"].items():
@@ -320,11 +458,24 @@ class Runner:
         log.info("=" * 60)
         log.info("MT5-Bot startet: " + ", ".join(f"{p['name']} ({p['strat'].name})" for p in self.profiles))
         self.connect()
+        if getattr(self.cfg, "DASHBOARD_PORT", 0):
+            from .dashboard import serve
+            url = serve(self.folder, self.cfg.DASHBOARD_PORT, self.cfg.SNAPSHOT_FILE)
+            log.info(f"Oberfläche: {url}  (nur auf diesem PC erreichbar)")
         self.heartbeat()
         last_hb = time.monotonic()
         try:
             while True:
-                self.step()
+                error = None
+                try:
+                    self.step()
+                except Exception as e:  # ein Fehler (z. B. kurz keine Verbindung) beendet den Bot nicht
+                    error = f"{type(e).__name__}: {e}"
+                    log.exception("Fehler im Durchlauf – nächster Versuch in Kürze")
+                try:
+                    self.write_snapshot(error)
+                except Exception:
+                    log.exception("Datenstand für die Oberfläche konnte nicht geschrieben werden")
                 if time.monotonic() - last_hb >= self.cfg.HEARTBEAT_MINUTES * 60:
                     self.heartbeat()
                     last_hb = time.monotonic()
