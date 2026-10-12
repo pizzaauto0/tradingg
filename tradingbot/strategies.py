@@ -678,12 +678,36 @@ class PullbackInTrend(Strategy):
         return df["close"] > sma(df["close"], self.params["exit_ma"])
 
 
+class MAPullback(Strategy):
+    """Methode aus dem Video: (1) Trend über Wochen nach oben, (2) kurzer Rücksetzer bis zur Durchschnittslinie -> Kauf."""
+    type_name = "ma_pullback"
+    default_regimes = ("uptrend", "sideways", "downtrend")  # den Trend prüft die Strategie selbst über die lange Linie
+    param_spec = {"ma_period": (int, 20, 300), "slope_bars": (int, 5, 100), "touch_pct": (float, 0.0, 3.0),
+                  "exit_pct": (float, 0.5, 10.0)}
+    description = ("Trend-Pullback an der Durchschnittslinie: Die lange Linie steigt (höher als vor N Kerzen), der Kurs fiel bis "
+                   "an die Linie zurück (Tief höchstens touch_pct % darüber) und schließt wieder darüber mit bullischer Kerze. "
+                   "Ausstieg, wenn der Kurs exit_pct % unter die Linie fällt (Trend gebrochen); sonst greifen Stop und Ziel.")
+    source = "Trend-Pullback zur Durchschnittslinie (Lehrvideo „Mein Bot handelt Gold“, Swing-Trading nach Murphy)"
+
+    def _ma(self, df):
+        return sma(df["close"], self.params["ma_period"])
+
+    def entry(self, df):
+        ma = self._ma(df)
+        rising = ma > ma.shift(self.params["slope_bars"])
+        touched = df["low"] <= ma * (1 + self.params["touch_pct"] / 100)
+        return rising & touched & (df["close"] > ma) & (df["close"] > df["open"])
+
+    def exit(self, df):
+        return df["close"] < self._ma(df) * (1 - self.params["exit_pct"] / 100)
+
+
 STRATEGY_TYPES: dict[str, type[Strategy]] = {
     cls.type_name: cls for cls in (
         MACrossover, TripleEMA, MACDCross, MACDZero, ADXTrend, Supertrend, ParabolicSAR, Ichimoku, HeikinAshi,
         ROCMomentum, Breakout, SqueezeBreakout, InsideBarBreakout, SessionBreakout, RSIReversion, ConnorsRSI2,
         IBSReversion, BollingerReversion, KeltnerReversion, ZScoreReversion, WilliamsR, StochasticCross,
-        CCIReversion, RangeSupport, VWAPReversion, PullbackInTrend,
+        CCIReversion, RangeSupport, VWAPReversion, PullbackInTrend, MAPullback,
     )
 }
 
@@ -736,6 +760,7 @@ DEFAULT_SPECS: list[tuple[str, dict[str, Any]]] = [
     ("cci_reversion", {"period": 20, "level": 150, "exit_level": 0}),
     ("range_support", {"lookback": 48, "zone": 0.25, "min_range_pct": 1.0, "exit_frac": 0.8}),
     ("vwap_reversion", {"period": 96, "deviation": 1.0}),
+    ("ma_pullback", {"ma_period": 100, "slope_bars": 20, "touch_pct": 0.5, "exit_pct": 3.0}),
     ("trend_pullback", {"trend": 200, "down_bars": 3, "exit_ma": 5}),
     ("trend_pullback", {"trend": 100, "down_bars": 4, "exit_ma": 5, "rr": 1.0}),
 ]

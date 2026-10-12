@@ -38,7 +38,10 @@ UNIVERSE: dict[str, dict[str, str]] = {
 }
 # Kosten je Seite in Prozent (Gebühr, Slippage): grobe, bewusst nicht zu optimistische Annahmen
 COSTS = {"Krypto": (0.10, 0.05), "Metalle": (0.03, 0.03), "Energie": (0.03, 0.05), "Indizes": (0.02, 0.02), "Aktien": (0.02, 0.03), "Forex": (0.005, 0.01)}
-PERIOD = {"1d": "10y", "1h": "730d", "1wk": "max"}
+PERIOD = {"1d": "10y", "1h": "730d", "4h": "730d", "1wk": "max"}
+# Video-Methode („Preis über steigender Linie + Rücksetzer bis zur Linie“) in mehreren Varianten: Linie, Steigung, Berührungstoleranz
+VIDEO_SPECS = [("ma_pullback", {"ma_period": m, "slope_bars": sl, "touch_pct": t, "exit_pct": 3.0})
+               for m in (50, 100, 200) for sl in (10, 30) for t in (0.5, 1.5)]
 
 
 def download(ticker: str, interval: str, cache: Path) -> pd.DataFrame | None:
@@ -48,7 +51,7 @@ def download(ticker: str, interval: str, cache: Path) -> pd.DataFrame | None:
     import yfinance as yf
     for attempt in range(3):
         try:
-            raw = yf.download(ticker, period=PERIOD[interval], interval=interval, auto_adjust=True, progress=False, threads=False)
+            raw = yf.download(ticker, period=PERIOD[interval], interval="1h" if interval == "4h" else interval, auto_adjust=True, progress=False, threads=False)
             if raw is None or raw.empty:
                 time.sleep(1.5)
                 continue
@@ -57,6 +60,8 @@ def download(ticker: str, interval: str, cache: Path) -> pd.DataFrame | None:
             df = raw.rename(columns=str.lower)[["open", "high", "low", "close", "volume"]].dropna()
             df.index = pd.to_datetime(df.index, utc=True)
             df.index.name = "time"
+            if interval == "4h":  # Yahoo kennt kein 4h: aus Stundenkerzen zusammensetzen
+                df = df.resample("4h").agg({"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}).dropna()
             cache.mkdir(parents=True, exist_ok=True)
             df.to_csv(f)
             return df
@@ -90,7 +95,7 @@ def stats_from_equity(eq: pd.Series, bars_per_year: float) -> dict[str, float]:
 
 def run_market(args: tuple) -> list[dict]:
     """Alle Strategien auf einem Markt (läuft in einem eigenen Prozess)."""
-    cls, name, df, interval, cfg_path = args
+    cls, name, df, interval, cfg_path, specs = args
     cfg = load_config(cfg_path)
     fee, slip = COSTS[cls]
     cfg = dataclasses.replace(cfg, market=dataclasses.replace(cfg.market, timeframe=interval),
@@ -100,7 +105,7 @@ def run_market(args: tuple) -> list[dict]:
     bh = float((df["close"].iloc[-1] / df["close"].iloc[WARMUP] - 1) * 100)
     bt = Backtester(cfg)
     rows = []
-    for type_name, params in DEFAULT_SPECS:
+    for type_name, params in specs:
         strat = build_strategy({"type": type_name, "params": params})
         try:
             res = bt.run(df, strat, symbol=name)
@@ -163,15 +168,17 @@ def main() -> int:
     ap.add_argument("--config", default=str(ROOT / "config.yaml"))
     ap.add_argument("--demo", action="store_true", help="Zufallsdaten statt Download (nur Funktionstest, Ergebnisse bedeutungslos)")
     ap.add_argument("--years", type=float, default=0, help="nur die letzten N Jahre testen (z. B. 2: Tageskerzen im selben Zeitraum wie der 1h-Test)")
+    ap.add_argument("--video", action="store_true", help="nur die Video-Methode (ma_pullback) in 12 Varianten testen")
     ap.add_argument("--limit", type=int, default=0, help="nur die ersten N Märkte (Test)")
     a = ap.parse_args()
-    out = Path(__file__).parent / "out" / (("demo_" if a.demo else "") + a.interval + (f"_{a.years:g}y" if a.years else ""))
+    out = Path(__file__).parent / "out" / (("demo_" if a.demo else "") + a.interval + (f"_{a.years:g}y" if a.years else "") + ("_video" if a.video else ""))
     out.mkdir(parents=True, exist_ok=True)
     cache = Path(__file__).parent / "cache"
-    min_trades = a.min_trades or {"1d": 15, "1h": 30, "1wk": 8}[a.interval]
+    min_trades = a.min_trades or {"1d": 15, "4h": 25, "1h": 30, "1wk": 8}[a.interval]
     if a.years and a.years <= 3 and not a.min_trades:
         min_trades = min(min_trades, 8)  # kurzer Zeitraum: weniger Trades möglich
 
+    specs = VIDEO_SPECS if a.video else DEFAULT_SPECS
     jobs, missing = [], []
     items = [(c, n, t) for c, m in UNIVERSE.items() for n, t in m.items()]
     if a.limit:
@@ -184,12 +191,12 @@ def main() -> int:
         if df is None or len(df) < WARMUP + (200 if not a.years else 100):
             missing.append(f"{name} ({ticker}): {'keine Daten' if df is None else f'nur {len(df)} Kerzen'}")
             continue
-        jobs.append((cls, name, df, a.interval, a.config))
+        jobs.append((cls, name, df, a.interval, a.config, specs))
     (out / "fehlend.txt").write_text("\n".join(missing) or "alle Märkte geladen", encoding="utf-8")
     if not jobs:
         print("Keine Daten geladen – Internetverbindung / yfinance prüfen (pip install yfinance).")
         return 1
-    print(f"\nTeste {len(DEFAULT_SPECS)} Strategie-Varianten auf {len(jobs)} Märkten …", flush=True)
+    print(f"\nTeste {len(specs)} Strategie-Varianten auf {len(jobs)} Märkten …", flush=True)
     rows, t0 = [], time.time()
     with ProcessPoolExecutor(max_workers=a.workers or None) as ex:
         for k, res in enumerate(ex.map(run_market, jobs), 1):

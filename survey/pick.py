@@ -11,7 +11,10 @@ from pathlib import Path
 
 import pandas as pd
 
-PICKS = {  # Kurzname -> Anfang des Strategienamens
+PICKS = {
+    "Video-Methode 100/30/0.5": "ma_pullback(ma_period=100,slope_bars=30,touch_pct=0.5",
+    "Video-Methode 200/30/0.5": "ma_pullback(ma_period=200,slope_bars=30,touch_pct=0.5",
+    "Video-Methode 50/10/0.5": "ma_pullback(ma_period=50,slope_bars=10,touch_pct=0.5",  # Kurzname -> Anfang des Strategienamens
     "Breakout 55/20": "breakout(lookback=55",
     "Connors RSI(2) Stop3/RR1": "connors_rsi2(trend=200,rsi_period=2,oversold=5.0",
     "IBS 0,2/0,8": "ibs_reversion(low=0.2",

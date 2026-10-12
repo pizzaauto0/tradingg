@@ -287,6 +287,16 @@ export const STRATEGY_TYPES = {
       return df.close.map((c, i) => c >= sup[i] + p.exit_frac * (res[i] - sup[i]));
     },
   },
+  ma_pullback: {
+    defaultRegimes: ["uptrend", "sideways", "downtrend"], paramSpec: { ma_period: ["int", 20, 300], slope_bars: ["int", 5, 100], touch_pct: ["float", 0.0, 3.0], exit_pct: ["float", 0.5, 10.0] },
+    description: "Trend-Pullback an der Durchschnittslinie: Die lange Linie steigt (höher als vor N Kerzen), der Kurs fiel bis an die Linie zurück (Tief höchstens touch_pct % darüber) und schließt wieder darüber mit bullischer Kerze. Ausstieg, wenn der Kurs exit_pct % unter die Linie fällt (Trend gebrochen); sonst greifen Stop und Ziel.",
+    source: "Trend-Pullback zur Durchschnittslinie (Lehrvideo „Mein Bot handelt Gold“, Swing-Trading nach Murphy)",
+    entry(df, p) {
+      const ma = sma(df.close, p.ma_period), old = shift(ma, p.slope_bars);
+      return df.close.map((c, i) => ma[i] > old[i] && df.low[i] <= ma[i] * (1 + p.touch_pct / 100) && c > ma[i] && c > df.open[i]);
+    },
+    exit(df, p) { const ma = sma(df.close, p.ma_period); return df.close.map((c, i) => c < ma[i] * (1 - p.exit_pct / 100)); },
+  },
   vwap_reversion: {
     defaultRegimes: S, paramSpec: { period: ["int", 20, 200], deviation: ["float", 0.2, 5.0] },
     description: "Kurs liegt X % unter dem gleitenden VWAP -> Kauf; Ausstieg bei Rückkehr zum VWAP (braucht Volumen).",
@@ -365,6 +375,7 @@ export const DEFAULT_SPECS = [
   ["zscore_reversion", { period: 50, entry_z: 2.0, exit_z: 0.0 }], ["zscore_reversion", { period: 30, entry_z: 2.5, exit_z: -0.5, rr: 1.0 }],
   ["williams_r", { period: 14, oversold: 90, exit_level: 30 }], ["stochastic", { k: 14, d: 3, oversold: 20, overbought: 80 }],
   ["cci_reversion", { period: 20, level: 150, exit_level: 0 }], ["range_support", { lookback: 48, zone: 0.25, min_range_pct: 1.0, exit_frac: 0.8 }], ["vwap_reversion", { period: 96, deviation: 1.0 }],
+  ["ma_pullback", { ma_period: 100, slope_bars: 20, touch_pct: 0.5, exit_pct: 3.0 }],
   ["trend_pullback", { trend: 200, down_bars: 3, exit_ma: 5 }], ["trend_pullback", { trend: 100, down_bars: 4, exit_ma: 5, rr: 1.0 }],
 ];
 
