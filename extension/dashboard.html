@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trading-Bot Dashboard</title>
+  <link rel="stylesheet" href="ui.css">
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body class="dash">
+  <div id="app">
+    <aside id="markets"></aside>
+    <section id="main">
+      <div id="head"></div>
+      <div id="chartwrap"><canvas id="chart"></canvas><div id="tip" hidden></div></div>
+      <div id="legend" class="muted"></div>
+      <div id="panels"></div>
+    </section>
+  </div>
+  <script src="dashboard.js" type="module"></script>
+</body>
+</html>

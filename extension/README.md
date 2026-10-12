@@ -54,6 +54,10 @@ Basierend auf der Strategie-Übersicht von trading.de (Trendkanal, Swing/Pullbac
 
 **Testtrade:** Im Bot-Kasten gibt es im Paper-Modus den Button „Testtrade (Paper)". Er eröffnet sofort eine kleine Spielgeld-Position (normale Risikoregeln, Stop und Ziel) ohne Strategie-Signal, damit du den ganzen Ablauf siehst. Im Trade-Log steht „TESTTRADE". Im Live-Modus gesperrt.
 
+## Dashboard (📈 im Popup)
+
+Großes Fenster mit Kerzenchart je Markt (aktualisiert alle 10 s): Trend über EMA 20/50, bei offener Position Einstieg, Stop-Loss und Ziel als Linien, Live-Gewinn, Balken Stop↔Ziel mit aktuellem Kurs, Kauf-/Verkaufsmarken, **Signal-Matrix** (alle aktiven Strategien je Markt: passt sie zur Marktphase, gibt sie gerade ein Einstiegssignal) und die letzten Entscheidungen. Links wechselst du zwischen den Märkten.
+
 ## Auf dem Handy: Steuerung per Telegram
 Die Extension läuft nur in einem Desktop-Browser (Chrome, Brave, Edge). Auf dem Handy bedienst du den Bot **per Telegram**:
 

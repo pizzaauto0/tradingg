@@ -264,6 +264,7 @@ document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click
   if (status) draw();
 }));
 
+document.getElementById("dash").addEventListener("click", () => chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") }));
 document.getElementById("settings").addEventListener("click", () => chrome.runtime.openOptionsPage());
 
 refresh();

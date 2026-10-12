@@ -1,0 +1,22 @@
+body.dash { width:auto; min-height:100vh; }
+#app { display:grid; grid-template-columns:230px 1fr; gap:14px; padding:14px; max-width:1500px; margin:0 auto; }
+#markets { display:flex; flex-direction:column; gap:8px; }
+.mk { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:8px 10px; cursor:pointer; }
+.mk.sel { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+.mk .t { display:flex; justify-content:space-between; font-weight:600; }
+.mk .s { display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-top:2px; }
+.badge { padding:1px 7px; border-radius:999px; font-size:11px; font-weight:600; background:var(--line); color:var(--fg); }
+.badge.up { background:var(--ok); color:#fff; } .badge.down { background:var(--bad); color:#fff; } .badge.side { background:var(--warn); color:#fff; }
+#head { display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:8px; margin-bottom:8px; }
+#head .price { font-size:28px; font-weight:700; }
+#head .pnl { font-size:18px; font-weight:600; }
+#chartwrap { position:relative; background:var(--card); border:1px solid var(--line); border-radius:8px; height:460px; }
+#chart { width:100%; height:100%; display:block; }
+#tip { position:absolute; pointer-events:none; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:5px 8px; font-size:12px; white-space:pre; }
+#legend { font-size:12px; margin:6px 2px 12px; display:flex; gap:14px; flex-wrap:wrap; }
+#legend i { display:inline-block; width:14px; height:3px; vertical-align:middle; margin-right:4px; }
+#panels { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:12px; }
+.bar { position:relative; height:14px; border-radius:7px; background:linear-gradient(90deg,var(--bad),var(--line) 40%,var(--ok)); margin:10px 0 6px; }
+.bar b { position:absolute; top:-4px; width:3px; height:22px; background:var(--fg); border-radius:2px; transform:translateX(-1px); }
+.sig { font-weight:700; } .sig.y { color:var(--ok); } .sig.n { color:var(--muted); }
+@media (max-width:900px) { #app { grid-template-columns:1fr; } #markets { flex-direction:row; overflow-x:auto; } .mk { min-width:170px; } }

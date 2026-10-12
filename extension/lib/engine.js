@@ -164,15 +164,23 @@ export class Engine {
 
   // ---- Sichtbarkeit: was der Bot gerade sieht und entscheidet (für die Anzeige im Popup) ----
   observe(sym, { closed, live, isNew, stamp }, now, tfMs) {
-    let market = null, sel = null, signal = null, note = "";
+    let market = null, sel = null, signal = null, note = "", checks = [];
     try {
       market = classifyMarket(closed);
       sel = selectStrategy(this.state.approved || [], sym, this.cfg.timeframe, market);
       signal = sel ? !!sel.strategy.entry(closed).at(-1) : null;
+      // Alle aktiven Strategien dieses Marktes prüfen (nicht nur die passendste): zeigt die ganze Signal-Matrix im Dashboard
+      for (const rec of this.state.approved || []) {
+        if (rec.symbol !== sym || rec.timeframe !== this.cfg.timeframe || rec.active === false) continue;
+        try {
+          const st = buildStrategy(rec.spec);
+          checks.push({ name: rec.title || st.name, fits: st.regimes.includes(market.regime), signal: !!st.entry(closed).at(-1), sharpe: rec.metrics?.sharpe ?? null });
+        } catch { /* ungültige Spezifikation überspringen */ }
+      }
     } catch (e) { note = e.message; }
     this.state.activity[sym] = {
       ts: now.toISOString(), price: last(live.close), regime: market?.regime ?? null, volatility: market?.volatility ?? null,
-      adx: market?.adx ?? null, strategy: sel?.strategy.name ?? null, signal, nextCandleAt: stamp + 2 * tfMs, note,
+      adx: market?.adx ?? null, strategy: sel?.strategy.name ?? null, signal, nextCandleAt: stamp + 2 * tfMs, note, checks,
     };
     if (isNew) {
       const what = !market ? `Analyse nicht möglich (${note})`

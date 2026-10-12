@@ -1,5 +1,6 @@
 // Steuerung: Konfiguration, Zustand, Durchlauf (Tick) und alle Aktionen, die das Popup auslösen kann.
-import { DEFAULTS, mergeConfig, validateConfig } from "./config.js";
+import { DEFAULTS, mergeConfig, validateConfig, symbolOf } from "./config.js";
+import { ema } from "./indicators.js";
 import { getLocal, setLocal, appendTrade } from "./store.js";
 import { Engine } from "./engine.js";
 import { fetchRecent } from "./data.js";
@@ -186,6 +187,17 @@ export async function handle(msg, fetchFn = fetch) {
       const sym = await engine.testEntry(new Date());
       await setLocal(stateKey(cfg), state);
       return sym;
+    }
+    case "chart": { // Daten für das Dashboard: Kerzen, Durchschnitte, Position, Aktivität
+      const st = await loadState(cfg);
+      const sym = msg.symbol || Object.keys(st.positions)[0] || symbolOf(cfg.assets[0]);
+      const df = await fetchRecent(cfg, sym, fetchFn), n = df.t.length, from = Math.max(0, n - (msg.bars || 160));
+      const e20 = ema(df.close, 20), e50 = ema(df.close, 50), cut = (a) => a.slice(from);
+      return { symbol: sym, timeframe: cfg.timeframe, t: cut(df.t), open: cut(df.open), high: cut(df.high), low: cut(df.low), close: cut(df.close),
+        ema20: cut(e20), ema50: cut(e50), position: st.positions[sym] || null, positions: st.positions, activity: st.activity || {},
+        decisions: (st.decisions || []).slice(-15).reverse(), symbols: cfg.assets.map(symbolOf), enabled: st.enabled, paper: !cfg.liveTrading,
+        trades: (await getLocal("trades", [])).filter((t) => t.symbol === sym).slice(-30),
+        risk: st.risk || {}, cash: st.paper?.cash ?? null, maxPositions: cfg.risk.maxOpenPositions };
     }
     case "tickNow": await whenIdle(); await runTick({ fetchFn }); return true;
     case "stop": { const st = await loadState(cfg); st.enabled = false; await setLocal(stateKey(cfg), st); return true; }
