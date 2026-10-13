@@ -46,6 +46,34 @@ Jedes Profil braucht eine **eigene Magic Number**; so verwalten mehrere Profile 
 - Entscheidung nur bei neu geschlossenen Kerzen; beim Start keine Alt-Signale.
 - Journal `mt5bot_journal.csv`, Log `mt5bot.log`, Lebenszeichen mit Marktzustand alle 15 Minuten.
 
+## Telegram: Trades ansehen, schließen, eröffnen
+**Einrichten (einmalig):** In Telegram `@BotFather` → `/newbot` → du bekommst einen Token. Dann im Projektordner `python -m mt5bot.telegram_setup`:
+Token eingeben (Eingabe unsichtbar), dem neuen Bot eine Nachricht schicken – das Programm findet deine Chat-ID selbst und speichert beides in `mt5bot_telegram.json` (nur lokal).
+Den Token nie in Chats posten; bei Verdacht in `@BotFather` → `/revoke`. Bot neu starten.
+
+| Befehl | Wirkung |
+|---|---|
+| `/status` `/trades` `/trade <Nr>` | Konto, alle offenen Trades, ein Trade mit Begründung („warum gekauft") |
+| `/markets` `/stats` `/log` `/report` | Zustand der Märkte, Kennzahlen (Woche/Monat/je Profil), letzte Ereignisse, Bericht jetzt |
+| `/close <Nr>` `/closeall` `/kill` | Schließen – **jeweils mit `/ja` bestätigen** (60 s gültig), `/nein` bricht ab |
+| `/buy <Symbol> [Risiko%]` `/sell …` | Manuell eröffnen mit Stop und Ziel (ATR-basiert), Vorschau mit Lotgröße, dann `/ja` |
+| `/pause` `/resume` | Keine neuen automatischen Trades / wieder erlauben |
+
+Automatisch aufs Handy: jeder Kauf (mit den ✔/✘-Bedingungen), jeder Verkauf (mit Grund und Ergebnis), Fehler, Limits, alle 6 Stunden ein Kurzbericht (`TELEGRAM_REPORT_HOURS`).
+Sicherheit: antwortet nur auf deine Chat-ID, alte Nachrichten aus der Zeit vor dem Start werden ignoriert, manuelle Trades respektieren Positions- und Tageslimit und das 2-%-Risikomaximum.
+`/sell` neben einem offenen Kauf im selben Markt braucht ein **Hedging-Konto** (bei Netting-Konten würde es die Position verringern statt eine zweite zu öffnen).
+
+## Autostart (Windows)
+`python -m mt5bot.autostart install` – legt im Autostart-Ordner eine Startdatei an (kein Administrator nötig). Beim Anmelden startet der Bot minimiert,
+**startet nach Abstürzen automatisch neu** und verbindet sich neu, wenn MetaTrader kurz wegbricht. `status` zeigt den Zustand, `remove` entfernt es.
+Trage in `config.py` bei `MT5_TERMINAL_PATH` den Pfad zu `terminal64.exe` ein, dann startet der Bot MetaTrader selbst.
+Voraussetzungen: Windows meldet dich nach einem Neustart automatisch an, der PC geht nicht in den Ruhezustand (Einstellungen → System → Netzbetrieb: „Nie"). Für echten 24/7-Betrieb: Windows-VPS.
+Bei einem Sicherheitsstopp (Echtgeld-Konto erkannt) startet der Bot bewusst nicht neu; Neustarts stehen in `logs/neustarts.log`.
+
+## Auswertung im Portal
+Unter „Kapital & Ergebnis": Kapitalkurve (Messpunkt alle 5 Minuten, 7 Tage / 30 Tage / alles), Ergebnis heute/Woche/Monat, Trefferquote, Profitfaktor, Ø R,
+Kennzahlen je Profil und die Liste der abgeschlossenen Trades (mit R, Ergebnis, Dauer, Grund). Daten: `mt5bot_trades.csv`, `mt5bot_equity.csv`. Telegram `/stats` zeigt dasselbe.
+
 ## Protokolle: warum gekauft, warum nicht
 Im Ordner `logs/` (im Projektordner) schreibt der Bot von selbst:
 - **`entscheidungen_<Datum>.log`** – jede ausgewertete Kerze: Kauf, **kein Kauf mit den nicht erfüllten Bedingungen** (✔/✘ je Bedingung mit den echten Zahlen), blockierte Signale (Positionslimit, Tageslimit), Order-Fehler, Verkäufe (Ausstiegssignal, Stop-Loss, Take-Profit, Kill-Switch) und Tageslimit-Ereignisse.

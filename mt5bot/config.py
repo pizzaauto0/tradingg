@@ -16,7 +16,18 @@ MT5_LOGIN = None               # z. B. 12345678
 MT5_PASSWORD = None
 MT5_SERVER = None              # z. B. "MetaQuotes-Demo"
 
+# --- Telegram (Token und Chat-ID NICHT hier eintragen: python -m mt5bot.telegram_setup speichert sie in mt5bot_telegram.json) ---
+TELEGRAM_ENABLED = True
+TELEGRAM_NOTIFY = ("KAUF", "VERKAUF", "FEHLER", "LIMIT", "BLOCKIERT")   # diese Ereignisse kommen sofort aufs Handy
+TELEGRAM_REPORT_HOURS = 6      # alle X Stunden Kurzbericht (Status + offene Trades); 0 = aus
+
+# --- Manuell eröffnen per Telegram (/buy, /sell): eigene Magic Number, immer mit Stop-Loss und Take-Profit ---
+MANUAL = {"enabled": True, "magic": 100900, "timeframe": "H4", "risk_percent": 0.5, "atr_stop_mult": 2.0, "rr": 2.0,
+          "symbols": []}       # zusätzliche Symbole, die du manuell handeln willst (neben denen deiner Profile)
+
 # --- Technik ---
+MT5_TERMINAL_PATH = None       # z. B. r"C:\Program Files\MetaTrader 5\terminal64.exe": startet das Terminal selbst (nützlich für den Autostart)
+DASHBOARD_OPEN_BROWSER = True  # Browser beim Start öffnen (beim Autostart sinnvollerweise False)
 BARS_HISTORY = 600             # so viele Kerzen je Markt für die Berechnung
 POLL_SECONDS = 30
 HEARTBEAT_MINUTES = 15         # Lebenszeichen + Marktzustand im Log

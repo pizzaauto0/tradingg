@@ -9,12 +9,12 @@ def main() -> int:
         import MetaTrader5 as mt5
     except ImportError:
         print("FEHLER: Paket MetaTrader5 fehlt (nur Windows). Installieren mit:  pip install MetaTrader5")
-        return 1
+        return 4
     try:
         Runner(mt5).run_forever()
     except RuntimeError as e:
         print(f"FEHLER: {e}")
-        return 1
+        return 3 if "SICHERHEITSSTOPP" in str(e) else 1
     return 0
 
 

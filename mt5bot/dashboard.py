@@ -18,6 +18,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+from . import history
+
 WEB = Path(__file__).parent / "web" / "index.html"
 KEY_FILE = "mt5bot_dashboard_key.txt"
 
@@ -83,6 +85,12 @@ def make_handler(folder: Path, snapshot_file: str, key: str | None, phone_urls: 
                 if not f.exists():
                     return self._send(503, b'{"error": "Noch kein Datenstand - laeuft der Bot?"}', "application/json")
                 return self._send(200, f.read_bytes(), "application/json")
+            if url.path == "/api/history":
+                try:
+                    days = float(parse_qs(url.query).get("days", [""])[0] or 0) or None
+                except ValueError:
+                    days = None
+                return self._send(200, json.dumps(history.summary(folder, days), default=str).replace("Infinity", "null").encode(), "application/json")
             if url.path == "/api/phone" and self._local():  # Handy-Link nur am PC selbst anzeigen
                 return self._send(200, json.dumps({"urls": phone_urls}).encode(), "application/json")
             return self._send(404, b"nicht gefunden", "text/plain; charset=utf-8")

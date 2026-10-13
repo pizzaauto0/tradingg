@@ -52,6 +52,12 @@
   .section { margin-top: 30px; }
   .phone { margin-bottom: 16px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--muted); }
   .phone code { color: var(--fg); word-break: break-all; user-select: all; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 14px; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .tile small { display: block; color: var(--muted); font-size: 11px; letter-spacing: .06em; } .tile strong { font-size: 18px; font-weight: 600; }
+  .range { display: flex; gap: 6px; } .range button { padding: 4px 10px; font-size: 12px; } .range button.on { border-color: var(--cyan); color: var(--cyan); }
+  #eqwrap { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 14px; } #eqwrap canvas { height: 190px; background: transparent; }
+  .tablewrap { overflow-x: auto; } td.r, th.r { text-align: right; white-space: nowrap; }
   .badge.ext { border-color: #9e6a03; color: #d29922; background: rgba(187,128,9,.12); }
   .title { flex-wrap: wrap; gap: 6px 16px; } #profiles { word-break: break-all; } td { word-break: break-word; }
   @media (max-width: 600px) { header { gap: 14px; padding: 12px 16px; } main { padding: 14px 16px 30px; } .grid { grid-template-columns: 1fr; } .sep { display: none; } }
@@ -74,6 +80,16 @@
   <div id="phone"></div>
   <div class="title"><span>OFFENE POSITIONEN</span><span id="count"></span></div>
   <div class="grid" id="cards"></div>
+  <div class="section">
+    <div class="title"><span>KAPITAL &amp; ERGEBNIS</span><span class="range" id="range"></span></div>
+    <div class="tiles" id="tiles"></div>
+    <div id="eqwrap"><canvas id="eq"></canvas></div>
+    <div class="tablewrap"><table><thead><tr><th>PROFIL</th><th class="r">TRADES</th><th class="r">TREFFER</th><th class="r">PROFITFAKTOR</th><th class="r">Ø R</th><th class="r">SUMME</th><th class="r">BESTER</th><th class="r">SCHLECHTESTER</th></tr></thead><tbody id="stats"></tbody></table></div>
+  </div>
+  <div class="section">
+    <div class="title"><span>ABGESCHLOSSENE TRADES</span><span id="months"></span></div>
+    <div class="tablewrap"><table><thead><tr><th>GESCHLOSSEN</th><th>PROFIL</th><th>MARKT</th><th>RICHTUNG</th><th class="r">R</th><th class="r">ERGEBNIS</th><th class="r">TAGE</th><th>GRUND</th></tr></thead><tbody id="trades"></tbody></table></div>
+  </div>
   <div class="section">
     <div class="title"><span>MÄRKTE &amp; SIGNALE</span><span id="profiles"></span></div>
     <table><thead><tr><th>PROFIL</th><th>MARKT</th><th>ZEITRAHMEN</th><th>ZUSTAND</th></tr></thead><tbody id="markets"></tbody></table>
@@ -120,14 +136,15 @@ function render() {
   $("acct").textContent = acc ? `Konto ${acc.login} · ${acc.server} · ${acc.demo ? "DEMO" : "ECHTGELD"}` : "nicht verbunden";
   $("brokerdot").className = acc && !stale ? "dot" : "dot off";
   $("broker").textContent = acc && !stale ? "Broker live" : "Broker offline";
-  const bad = s.error || stale || s.kill || s.halted;
-  $("status").textContent = s.kill ? "KILL-SWITCH" : s.halted ? "Tageslimit" : stale ? "Bot steht?" : s.error ? "Fehler" : "Bot OK";
+  const bad = s.error || stale || s.kill || s.halted || s.paused;
+  $("status").textContent = s.kill ? "KILL-SWITCH" : s.paused ? "Pausiert" : s.halted ? "Tageslimit" : stale ? "Bot steht?" : s.error ? "Fehler" : "Bot OK";
   $("status").className = bad ? "pill bad" : "pill";
 
   const banners = [];
   if (s.error) banners.push(`Letzter Durchlauf mit Fehler: ${s.error}`);
   if (stale) banners.push(`Der Datenstand ist ${Math.round(ageS / 60)} Minuten alt – läuft der Bot noch?`);
   if (s.kill) banners.push("KILL-SWITCH aktiv: keine neuen Trades, Positionen werden geschlossen. Datei KILL_SWITCH löschen zum Fortsetzen.");
+  if (s.paused) banners.push("PAUSIERT (Telegram /pause): keine neuen automatischen Trades. /resume hebt es auf.");
   if (s.halted) banners.push("Tagesverlust-Limit erreicht: keine neuen Trades bis zum nächsten Tag (UTC).");
   if (acc && !acc.demo) banners.push("ACHTUNG: ECHTGELD-KONTO.");
   $("banner").replaceChildren(...banners.map((b) => h("div", "banner", b)));
@@ -217,7 +234,60 @@ function draw(cv, p) {
   for (const v of ticks) { const y = Y(v); if (y > padT + 4 && y < H - padB - 2 && !used.some((u) => Math.abs(u - y) < 14)) g.fillText(px(v), W - padR + 6, y); }
 }
 
-$("refresh").onclick = load;
+let days = 0, hist = null;
+const RANGES = [[7, "7 Tage"], [30, "30 Tage"], [0, "Alles"]];
+function drawRange() {
+  $("range").replaceChildren(...RANGES.map(([d, label]) => { const b = h("button", d === days ? "on" : "", label); b.onclick = () => { days = d; loadHistory(); }; return b; }));
+}
+async function loadHistory() {
+  drawRange();
+  try {
+    const q = (KEY ? KEY + "&" : "?") + "days=" + days;
+    const r = await fetch("/api/history" + q, { cache: "no-store" });
+    if (!r.ok) return;
+    hist = await r.json();
+    renderHistory();
+  } catch (e) { /* Verlauf ist optional */ }
+}
+const pfText = (x) => (x == null ? "–" : x === Infinity ? "∞" : num(x));
+function renderHistory() {
+  const { stats, periods, trades, equity } = hist, a = stats.all, ccy = snap && snap.account ? snap.account.currency : "";
+  const tile = (k, v, cls) => { const d = h("div", "tile"); d.append(h("small", null, k), h("strong", cls || "", v)); return d; };
+  const cls = (x) => (x > 0 ? "pos" : x < 0 ? "neg" : "");
+  $("tiles").replaceChildren(
+    tile("HEUTE", `${signed(periods.today)} ${ccy}`, cls(periods.today)), tile("DIESE WOCHE", `${signed(periods.week)} ${ccy}`, cls(periods.week)),
+    tile("DIESER MONAT", `${signed(periods.month)} ${ccy}`, cls(periods.month)), tile("TRADES GESAMT", String(a.trades)),
+    tile("TREFFERQUOTE", a.win_rate == null ? "–" : `${num(a.win_rate, 0)} %`), tile("PROFITFAKTOR", pfText(a.profit_factor)),
+    tile("Ø R PRO TRADE", a.avg_r == null ? "–" : signed(a.avg_r), a.avg_r == null ? "" : cls(a.avg_r)));
+  const rows = [["Alle", a], ...Object.entries(stats.profiles)];
+  $("stats").replaceChildren(...rows.map(([name, x]) => { const tr = h("tr");
+    [name, x.trades, x.win_rate == null ? "–" : `${num(x.win_rate, 0)} %`, pfText(x.profit_factor), x.avg_r == null ? "–" : signed(x.avg_r), signed(x.pnl), x.best == null ? "–" : signed(x.best), x.worst == null ? "–" : signed(x.worst)]
+      .forEach((v, i) => { const td = h("td", i ? "r" : "", v); if (i === 5) td.className = "r " + cls(x.pnl); tr.append(td); }); return tr; }));
+  $("months").textContent = periods.months.slice(0, 4).map((m) => `${m.month}: ${signed(m.pnl)} (${m.n})`).join("  ·  ");
+  $("trades").replaceChildren(...(trades.length ? trades : []).map((t) => { const tr = h("tr");
+    const when = t.closed ? new Date(t.closed).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "–";
+    [when, t.profile, t.symbol, t.direction === "short" ? "SHORT" : "LONG", t.r == null ? "–" : `${signed(t.r)}R`, t.pnl == null ? "–" : signed(t.pnl), t.days == null ? "–" : num(t.days, 1), t.close_reason]
+      .forEach((v, i) => { const td = h("td", [4, 5, 6].includes(i) ? "r" : "", v); if (i === 4 || i === 5) td.className += " " + cls(i === 4 ? t.r : t.pnl); tr.append(td); }); return tr; }));
+  if (!trades.length) $("trades").replaceChildren(h("tr", null, "")), $("trades").firstChild.append(Object.assign(h("td", "muted", "Noch keine abgeschlossenen Trades."), { colSpan: 8 }));
+  drawEquity(equity);
+}
+function drawEquity(pts) {
+  const cv = $("eq"), dpr = devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const g = cv.getContext("2d"); g.scale(dpr, dpr); g.clearRect(0, 0, W, H);
+  g.font = "11px ui-monospace, Consolas, monospace"; g.textBaseline = "middle";
+  if (!pts || pts.length < 2) { g.fillStyle = "#6e7681"; g.fillText("Kapitalkurve entsteht, sobald der Bot einige Minuten läuft (Messpunkt alle 5 Minuten).", 14, H / 2); return; }
+  const t = pts.map((p) => Date.parse(p[0])), v = pts.map((p) => p[1]);
+  let lo = Math.min(...v), hi = Math.max(...v); const m = (hi - lo) * 0.1 || hi * 0.001 || 1; lo -= m; hi += m;
+  const padL = 8, padR = 70, padT = 12, padB = 22, X = (x) => padL + ((x - t[0]) / (t[t.length - 1] - t[0] || 1)) * (W - padL - padR), Y = (y) => padT + (1 - (y - lo) / (hi - lo)) * (H - padT - padB);
+  for (let i = 0; i <= 3; i++) { const val = lo + ((hi - lo) * i) / 3, y = Y(val); g.strokeStyle = "#1c2430"; g.beginPath(); g.moveTo(padL, y); g.lineTo(W - padR, y); g.stroke(); g.fillStyle = "#6e7681"; g.fillText(num(val, 0), W - padR + 8, y); }
+  const up = v[v.length - 1] >= v[0], col = up ? "#3fb950" : "#f85149";
+  g.beginPath(); pts.forEach((p, i) => (i ? g.lineTo(X(t[i]), Y(v[i])) : g.moveTo(X(t[i]), Y(v[i]))));
+  g.strokeStyle = col; g.lineWidth = 1.8; g.stroke(); g.lineTo(X(t[t.length - 1]), H - padB); g.lineTo(X(t[0]), H - padB); g.closePath(); g.fillStyle = up ? "rgba(63,185,80,.10)" : "rgba(248,81,73,.10)"; g.fill(); g.lineWidth = 1;
+  g.fillStyle = "#6e7681"; g.fillText(new Date(t[0]).toLocaleDateString("de-DE"), padL, H - 8); g.fillText(new Date(t[t.length - 1]).toLocaleDateString("de-DE"), W - padR - 66, H - 8);
+  g.fillStyle = col; g.fillRect(W - padR + 2, Y(v[v.length - 1]) - 8, padR - 4, 16); g.fillStyle = "#fff"; g.fillText(num(v[v.length - 1], 0), W - padR + 8, Y(v[v.length - 1]));
+}
+$("refresh").onclick = () => { load(); loadHistory(); };
 // Nur am PC selbst: Link fürs Handy anzeigen (der Server liefert ihn nur an 127.0.0.1)
 fetch("/api/phone").then((r) => (r.ok ? r.json() : null)).then((d) => {
   if (!d || !d.urls.length) return;
@@ -225,9 +295,11 @@ fetch("/api/phone").then((r) => (r.ok ? r.json() : null)).then((d) => {
   d.urls.forEach((u, i) => { if (i) box.append("  ·  "); box.append(h("code", null, u)); });
   $("phone").replaceChildren(box);
 }).catch(() => {});
-addEventListener("resize", () => snap && render());
+addEventListener("resize", () => { if (snap) render(); if (hist) renderHistory(); });
 load();
+loadHistory();
 setInterval(load, 15000);
+setInterval(loadHistory, 60000);
 </script>
 </body>
 </html>

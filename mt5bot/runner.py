@@ -22,6 +22,7 @@ from pathlib import Path
 import pandas as pd
 
 from . import config as default_config
+from . import history
 from .signals import atr_last, make_strategy
 
 TF_NAMES = ("M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1")
@@ -44,6 +45,8 @@ class Runner:
         self.events: list[dict] = []          # Ereignisse seit dem letzten Stundenbericht
         self.started = datetime.now().astimezone()
         self.errors_since_report: list[str] = []
+        self.tg = None
+        self.last_equity_log = 0.0
         self.symbols: dict[str, str] = {}      # Konfig-Name -> Broker-Name
         self.last_bar: dict[tuple, object] = {}
         self.halted_day: str | None = None
@@ -59,7 +62,7 @@ class Runner:
                 if tf not in TF_NAMES:
                     raise ValueError(f"{p['name']}: Zeitrahmen {tf} unbekannt ({TF_NAMES})")
             self.profiles.append({**p, "strat": strat})
-        magics = [p["magic"] for p in self.profiles]
+        magics = [p["magic"] for p in self.profiles] + sorted(self.manual_magics())
         if len(set(magics)) != len(magics):
             raise ValueError("Jedes Profil braucht eine eigene Magic Number")
 
@@ -68,6 +71,13 @@ class Runner:
         d = self._path(getattr(self.cfg, "LOG_DIR", "logs"))
         d.mkdir(parents=True, exist_ok=True)
         return d
+
+    def tg_notify(self, text: str) -> None:
+        if self.tg is not None:
+            try:
+                self.tg.notify(text)
+            except Exception:
+                log.exception("Telegram-Nachricht nicht gesendet")
 
     @staticmethod
     def fmt_checks(checks) -> str:
@@ -79,6 +89,8 @@ class Runner:
         self.events.append({"t": now.isoformat(), "kind": kind, "head": head, "text": text, "checks": list(checks or [])})
         line = f"{now:%Y-%m-%d %H:%M:%S} | {kind:<10} | {head}" + (f" | {text}" if text else "")
         extra = self.fmt_checks(checks)
+        if kind in getattr(self.cfg, "TELEGRAM_NOTIFY", ("KAUF", "VERKAUF", "FEHLER", "LIMIT", "BLOCKIERT")):
+            self.tg_notify(f"{kind} – {head}" + (f"\n{text}" if text else "") + (("\n" + extra.replace("      ", "")) if kind == "KAUF" else ""))
         try:
             with open(self._logdir() / f"entscheidungen_{now:%Y-%m-%d}.log", "a", encoding="utf-8") as fh:
                 fh.write(line + "\n" + (extra + "\n" if extra else ""))
@@ -201,6 +213,8 @@ class Runner:
         kw = {}
         if self.cfg.MT5_LOGIN:
             kw = dict(login=self.cfg.MT5_LOGIN, password=self.cfg.MT5_PASSWORD, server=self.cfg.MT5_SERVER)
+        if getattr(self.cfg, "MT5_TERMINAL_PATH", None):
+            kw["path"] = self.cfg.MT5_TERMINAL_PATH  # startet das Terminal selbst, falls es nicht läuft
         if not self.mt5.initialize(**kw):
             raise RuntimeError(f"MT5-Initialisierung fehlgeschlagen: {self.mt5.last_error()} – läuft das Terminal und ist es eingeloggt?")
         acc = self.mt5.account_info()
@@ -216,6 +230,7 @@ class Runner:
 
     def ensure_symbols(self) -> None:
         wanted = {s for p in self.profiles for s in p["markets"]} | {r for p in self.profiles for r in p["strat"].needs}
+        wanted |= set((getattr(self.cfg, "MANUAL", None) or {}).get("symbols", []))
         for name in sorted(wanted):
             for cand in [name] + [a for a in self.cfg.SYMBOL_ALIASES.get(name, []) if a != name]:
                 info = self.mt5.symbol_info(cand)
@@ -245,6 +260,10 @@ class Runner:
         df["volume"] = df["tick_volume"] if "tick_volume" in df else 1.0
         return df[["open", "high", "low", "close", "volume"]].iloc[:-1]  # letzte Zeile = laufende Kerze
 
+    def manual_magics(self) -> set:
+        man = self.manual_profile()
+        return {man["magic"]} if man else set()
+
     def all_positions(self):
         """Alle Positionen des Kontos – auch von anderen Bots oder manuell (nur zur Anzeige, verwaltet werden nur eigene)."""
         return list(self.mt5.positions_get() or [])
@@ -254,6 +273,8 @@ class Runner:
         own = next((p for p in self.profiles if p["magic"] == magic), None)
         if own:
             return own["name"], True
+        if magic in self.manual_magics():
+            return "manuell (Telegram)", True
         cfgp = next((p for p in self.cfg.PROFILES if p["magic"] == magic), None)
         if cfgp:
             return f"{cfgp['name']} (extern)", False
@@ -262,7 +283,7 @@ class Runner:
 
     def positions(self, magic: int | None = None, name: str | None = None):
         pos = self.mt5.positions_get() or []
-        magics = {p["magic"] for p in self.profiles}
+        magics = {p["magic"] for p in self.profiles} | self.manual_magics()
         sym = self.symbols.get(name) if name else None
         return [p for p in pos if (p.magic == magic if magic is not None else p.magic in magics) and (sym is None or p.symbol == sym)]
 
@@ -306,17 +327,16 @@ class Runner:
             res = mt5.order_send(req)
         return res
 
-    def place(self, prof: dict, name: str, direction: str, why: str) -> bool:
+    def _order_plan(self, prof: dict, name: str, direction: str) -> dict:
+        """Berechnet Preis, Stop, Ziel und Lotgröße (1 % Risiko). Wirft RuntimeError mit lesbarem Grund, wenn kein Trade möglich ist."""
         mt5, sym = self.mt5, self.symbols[name]
         info, tick = mt5.symbol_info(sym), mt5.symbol_info_tick(sym)
         df = self.closed_bars(name, prof["markets"][name])
         if info is None or tick is None or df is None:
-            return False
-        a = atr_last(df)
-        stop = a * prof.get("atr_stop_mult", 2.0)
+            raise RuntimeError(f"{sym}: keine Kurse (Markt geschlossen?)")
+        stop = atr_last(df) * prof.get("atr_stop_mult", 2.0)
         if not stop > 0:
-            log.warning(f"{sym}: ATR unbrauchbar – kein Einstieg.")
-            return False
+            raise RuntimeError(f"{sym}: ATR unbrauchbar")
         stop = max(stop, (info.trade_stops_level or 0) * info.point * 1.1)  # Broker-Mindestabstand
         long = direction == "long"
         price = tick.ask if long else tick.bid
@@ -324,8 +344,31 @@ class Runner:
         tp = round(price + stop * prof.get("rr", 2.0) if long else price - stop * prof.get("rr", 2.0), info.digits)
         calc = self.calc_lots(sym, direction, price, sl, prof.get("risk_percent", 1.0))
         if calc is None:
-            return False
+            raise RuntimeError(f"{sym}: Lotgröße nicht berechenbar oder Risiko zu hoch (Konto zu klein?)")
         lots, risk = calc
+        return {"sym": sym, "price": price, "sl": sl, "tp": tp, "lots": lots, "risk": risk}
+
+    def plan_order(self, prof: dict, name: str, direction: str) -> str:
+        pl = self._order_plan(prof, name, direction)
+        return (f"{pl['lots']} Lots @ {pl['price']} | Stop {pl['sl']} | Ziel {pl['tp']}\n"
+                f"Risiko {pl['risk']:.2f} ({prof.get('risk_percent', 1.0)} % des Kontos, {prof.get('atr_stop_mult', 2.0)}xATR, Ziel {prof.get('rr', 2.0)}R)")
+
+    def manual_profile(self) -> dict | None:
+        m = getattr(self.cfg, "MANUAL", None)
+        if not m or not m.get("enabled", True):
+            return None
+        return {"name": "manuell", "magic": m["magic"], "timeframe": m.get("timeframe", "H4"), "risk_percent": m.get("risk_percent", 0.5),
+                "atr_stop_mult": m.get("atr_stop_mult", 2.0), "rr": m.get("rr", 2.0)}
+
+    def place(self, prof: dict, name: str, direction: str, why: str) -> bool:
+        mt5 = self.mt5
+        try:
+            pl = self._order_plan(prof, name, direction)
+        except RuntimeError as e:
+            log.warning(f"{e} – Trade übersprungen.")
+            return False
+        sym, price, sl, tp, lots, risk = pl["sym"], pl["price"], pl["sl"], pl["tp"], pl["lots"], pl["risk"]
+        long = direction == "long"
         req = {"action": mt5.TRADE_ACTION_DEAL, "symbol": sym, "volume": lots, "type": mt5.ORDER_TYPE_BUY if long else mt5.ORDER_TYPE_SELL,
                "price": price, "sl": sl, "tp": tp, "deviation": 20, "magic": prof["magic"], "comment": prof["name"][:20],
                "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC}
@@ -372,10 +415,13 @@ class Runner:
         res = self._send(req)
         ok = bool(res and res.retcode == mt5.TRADE_RETCODE_DONE)
         log.info(f"{'GESCHLOSSEN' if ok else 'SCHLIESSEN FEHLGESCHLAGEN'}: {pos.symbol} #{pos.ticket} – {why}")
-        self.event("VERKAUF" if ok else "FEHLER", f"{pos.symbol} #{pos.ticket}", f"{why}; Gewinn zuletzt {getattr(pos, 'profit', 0.0):+.2f}")
         if ok:
-            self.journal({"zeit": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "ereignis": "CLOSE", "symbol": pos.symbol, "grund": why,
-                          "gewinn": f"{pos.profit:.2f}", "lots": pos.volume})
+            rec = self.state.setdefault("trades", {}).setdefault(str(pos.ticket), {})
+            rec["close_reason"] = why
+            rec["close_price"] = getattr(res, "price", None) or None
+            self.track_positions()  # Abschluss sofort festhalten (Ergebnis, R, Auswertung)
+        else:
+            self.event("FEHLER", f"{pos.symbol} #{pos.ticket}", f"Schließen fehlgeschlagen: {why} (Retcode {res.retcode if res else '?'})")
         return ok
 
     # ---------- Tageslimit & Kill-Switch ----------
@@ -398,6 +444,27 @@ class Runner:
             return False
         return True
 
+    def reconnect(self) -> None:
+        """Terminal weg oder getrennt: neu verbinden (mit Pause zwischen den Versuchen) – der Bot läuft einfach weiter."""
+        if time.monotonic() - getattr(self, "_last_reconnect", -1e9) < 20:
+            return
+        self._last_reconnect = time.monotonic()
+        log.warning("Keine Verbindung zum MetaTrader-Konto – versuche neu zu verbinden …")
+        try:
+            self.mt5.shutdown()
+        except Exception:
+            pass
+        kw = {}
+        if getattr(self.cfg, "MT5_LOGIN", None):
+            kw = dict(login=self.cfg.MT5_LOGIN, password=self.cfg.MT5_PASSWORD, server=self.cfg.MT5_SERVER)
+        if getattr(self.cfg, "MT5_TERMINAL_PATH", None):
+            kw["path"] = self.cfg.MT5_TERMINAL_PATH
+        if self.mt5.initialize(**kw) and self.mt5.account_info() is not None:
+            log.info("Wieder verbunden.")
+            self.event("FEHLER", "Verbindung", "MetaTrader-Verbindung war weg und wurde wiederhergestellt")
+        else:
+            raise RuntimeError(f"MetaTrader nicht erreichbar: {self.mt5.last_error()}")
+
     def kill_requested(self) -> bool:
         return self._path(self.cfg.KILL_FILE).exists()
 
@@ -417,30 +484,34 @@ class Runner:
         return float((tick.bid if buy else tick.ask) if tick else pos.price_open)
 
     def track_positions(self, now: datetime | None = None) -> None:
-        """Merkt sich je Position Einstieg, Anfangs-Stop (= 1R), Eröffnungszeit und den besten Kurs seither."""
+        """Merkt sich je Position Einstieg, Anfangs-Stop (= 1R), Zeit, besten Kurs; schließt beendete Positionen ab (Auswertung)."""
         now = now or datetime.now(timezone.utc)
         rec = self.state.setdefault("trades", {})
         live = {str(p.ticket): p for p in self.all_positions()}
         for t in [t for t in rec if t not in live]:
-            self._note_closed_by_broker(t, rec[t])
+            self._finish_trade(t, rec[t])
             del rec[t]
         for t, pos in live.items():
             price = self._price(pos)
             r = rec.get(t)
-            if r is None:
+            if r is None or "entry" not in r:
                 opened = getattr(pos, "time", 0)
-                rec[t] = r = {"entry": float(pos.price_open), "sl0": float(pos.sl), "best": price,
+                keep = r or {}
+                rec[t] = r = {**keep, "entry": float(pos.price_open), "sl0": float(pos.sl), "best": price,
                               "opened": datetime.fromtimestamp(opened, timezone.utc).isoformat() if opened else now.isoformat()}
             if not r.get("sl0") and pos.sl:
                 r["sl0"] = float(pos.sl)
             buy = pos.type == self.mt5.POSITION_TYPE_BUY
             r["best"] = max(r["best"], price) if buy else min(r["best"], price)
+            label, _ = self.bot_name(pos.magic)
+            r.update(symbol=pos.symbol, magic=pos.magic, profile=label, direction="long" if buy else "short", volume=pos.volume,
+                     last_profit=float(getattr(pos, "profit", 0.0)), last_price=price)
         self._save_state()
 
-    def _note_closed_by_broker(self, ticket: str, r: dict) -> None:
-        """Position ist weg, ohne dass der Bot sie geschlossen hat (Stop-Loss/Take-Profit beim Broker, manuell): Grund und Ergebnis festhalten."""
+    def _finish_trade(self, ticket: str, r: dict) -> None:
+        """Position ist weg (vom Bot, per Stop-Loss/Take-Profit beim Broker oder von Hand geschlossen): Grund und Ergebnis festhalten."""
         mt5 = self.mt5
-        reason, profit, price = "geschlossen (Stop-Loss, Take-Profit oder manuell)", None, None
+        reason, profit, price = r.get("close_reason"), None, r.get("close_price")
         try:
             if hasattr(mt5, "history_select"):
                 now = datetime.now(timezone.utc)
@@ -450,16 +521,31 @@ class Runner:
             if outs:
                 profit = sum(d.profit + getattr(d, "commission", 0) + getattr(d, "swap", 0) for d in outs)
                 price = outs[-1].price
-                why = {getattr(mt5, "DEAL_REASON_SL", 3): "Stop-Loss getroffen", getattr(mt5, "DEAL_REASON_TP", 4): "Take-Profit erreicht"}
-                reason = why.get(getattr(outs[-1], "reason", -1), reason)
+                if not reason:
+                    why = {getattr(mt5, "DEAL_REASON_SL", 3): "Stop-Loss getroffen", getattr(mt5, "DEAL_REASON_TP", 4): "Take-Profit erreicht"}
+                    reason = why.get(getattr(outs[-1], "reason", -1))
         except Exception:
             log.exception("Abschlussdaten nicht abrufbar")
-        risk = abs(r.get("entry", 0) - r.get("sl0", 0)) if r.get("sl0") else None
-        text = f"{reason}" + (f" @ {price}" if price is not None else "") + (f", Ergebnis {profit:+.2f}" if profit is not None else "")
-        self.event("VERKAUF", f"Ticket {ticket}", text + (f" | ursprüngliche Begründung: {r['reason'].splitlines()[0]}" if r.get("reason") else ""))
-        if profit is not None:
-            self.journal({"zeit": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "ereignis": "CLOSE", "symbol": "", "grund": reason, "gewinn": f"{profit:.2f}", "preis": price})
-        del risk
+        reason = reason or "geschlossen (Stop-Loss, Take-Profit oder manuell)"
+        if profit is None:
+            profit = r.get("last_profit")      # Näherung: letzter bekannter Gewinn
+        if price is None:
+            price = r.get("last_price")
+        entry, sl0 = r.get("entry"), r.get("sl0")
+        sign = 1 if r.get("direction", "long") == "long" else -1
+        r_mult = sign * (price - entry) / abs(entry - sl0) if price is not None and entry is not None and sl0 and abs(entry - sl0) > 0 else None
+        opened = r.get("opened")
+        days = (datetime.now(timezone.utc) - datetime.fromisoformat(opened)).total_seconds() / 86400 if opened else None
+        sym = r.get("symbol", "")
+        text = f"{reason}" + (f" @ {price}" if price is not None else "") + (f", Ergebnis {profit:+.2f}" if profit is not None else "") + (f" ({r_mult:+.2f}R)" if r_mult is not None else "")
+        self.event("VERKAUF", f"{sym} #{ticket} [{r.get('profile', '?')}]", text + (f" | ursprüngliche Begründung: {r['reason'].splitlines()[0]}" if r.get("reason") else ""))
+        now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        history.append_trade(self.folder, {"opened": opened, "closed": now_iso, "profile": r.get("profile", ""), "symbol": sym, "direction": r.get("direction", ""),
+                                           "lots": r.get("volume", ""), "entry": entry, "exit": price, "sl0": sl0, "pnl": None if profit is None else round(profit, 2),
+                                           "r": None if r_mult is None else round(r_mult, 3), "days": None if days is None else round(days, 3),
+                                           "close_reason": reason, "open_reason": (r.get("reason") or "").replace("\n", " | ")})
+        self.journal({"zeit": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "ereignis": "CLOSE", "profil": r.get("profile", ""), "symbol": sym, "richtung": r.get("direction", ""),
+                      "lots": r.get("volume", ""), "preis": price, "gewinn": "" if profit is None else f"{profit:.2f}", "grund": reason})
 
     def r_values(self, pos) -> tuple[float | None, float | None]:
         r = self.state.get("trades", {}).get(str(pos.ticket))
@@ -544,6 +630,7 @@ class Runner:
             "account": None if acc is None else {"login": acc.login, "server": acc.server, "equity": acc.equity, "balance": acc.balance,
                                                   "currency": acc.currency, "demo": acc.trade_mode == mt5.ACCOUNT_TRADE_MODE_DEMO},
             "start_equity": self.state.get("start_equity"), "halted": self.halted_day is not None, "kill": self.kill_requested(),
+            "paused": bool(self.state.get("paused")), "telegram": self.tg is not None,
             "max_positions": self.cfg.MAX_OPEN_POSITIONS, "profiles": [{"name": p["name"], "strategy": p["strat"].name} for p in self.profiles],
             "next_bar": self._next_bar_time(), "positions": positions, "markets": self._status,
         }
@@ -573,7 +660,9 @@ class Runner:
                 self._kill_logged = True
             return
         self._kill_logged = False
-        allowed = self.day_check()
+        if self.mt5.account_info() is None:
+            self.reconnect()
+        allowed = self.day_check() and not self.state.get("paused")
         self.track_positions()
         self.manage_open()
         for prof in self.profiles:
@@ -633,6 +722,50 @@ class Runner:
                 extra = {r: self.closed_bars(r, tf) for r in prof["strat"].needs}
                 log.info(f"   [{prof['name']}] {name} ({tf}): {prof['strat'].status(df, extra)}")
 
+    def start_telegram(self) -> None:
+        from . import telegram as tgm
+        if not getattr(self.cfg, "TELEGRAM_ENABLED", True):
+            return
+        token, chat = tgm.load_credentials(self.folder)
+        if not token or not chat:
+            log.info("Telegram: nicht eingerichtet (python -m mt5bot.telegram_setup) – läuft ohne.")
+            return
+        self.tg = tgm.TelegramBridge(self, tgm.TelegramApi(token), chat)
+        self.tg.start()
+        acc = self.mt5.account_info()
+        self.tg.notify(f"MT5-Bot gestartet ({'DEMO' if acc and acc.trade_mode == self.mt5.ACCOUNT_TRADE_MODE_DEMO else 'KONTO'} {acc.login if acc else '?'}). "
+                       f"Profile: {', '.join(p['name'] for p in self.profiles)}. /help zeigt die Befehle.")
+        log.info("Telegram: verbunden (Befehle: /help)")
+
+    def log_equity(self, force: bool = False) -> None:
+        if not force and time.monotonic() - self.last_equity_log < 300:
+            return
+        acc = self.mt5.account_info()
+        if acc is not None:
+            history.append_equity(self.folder, datetime.now(timezone.utc), acc.equity)
+            self.last_equity_log = time.monotonic()
+
+    def periodic_summary(self) -> None:
+        hours = getattr(self.cfg, "TELEGRAM_REPORT_HOURS", 0)
+        if not hours or self.tg is None:
+            return
+        last = self.state.get("last_tg_summary")
+        if last and (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() < hours * 3600:
+            return
+        self.state["last_tg_summary"] = datetime.now(timezone.utc).isoformat()
+        self._save_state()
+        self.tg.c_status([])
+        if self.all_positions():
+            self.tg.c_trades([])
+
+    def pump(self, seconds: float) -> None:
+        """Wartet bis zum nächsten Durchlauf, bearbeitet dabei jede Sekunde Telegram-Befehle (schnelle Reaktion auf dem Handy)."""
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            if self.tg is not None:
+                self.tg.process()
+            time.sleep(min(1.0, max(0.0, end - time.monotonic())))
+
     def run_forever(self) -> None:
         setup_logging(str(self._path(self.cfg.LOG_FILE)))
         log.info("=" * 60)
@@ -640,13 +773,16 @@ class Runner:
         self.connect()
         if getattr(self.cfg, "DASHBOARD_PORT", 0):
             from .dashboard import serve
-            info = serve(self.folder, self.cfg.DASHBOARD_PORT, self.cfg.SNAPSHOT_FILE, lan=getattr(self.cfg, "DASHBOARD_PHONE", False))
+            info = serve(self.folder, self.cfg.DASHBOARD_PORT, self.cfg.SNAPSHOT_FILE, lan=getattr(self.cfg, "DASHBOARD_PHONE", False),
+                         open_browser=getattr(self.cfg, "DASHBOARD_OPEN_BROWSER", True) and not os.environ.get("MT5BOT_NO_BROWSER"))
             log.info(f"Oberfläche: {info['local']}")
             for u in info["phone"]:
                 log.info(f"Auf dem Handy (gleiches WLAN oder Tailscale): {u}   <- Link geheim halten, er enthält den Zugangsschlüssel")
+        self.start_telegram()
         self.heartbeat()
         try:
             self.maybe_report(force=True)  # Startbericht: Zustand und Marktanalyse sofort
+            self.log_equity(force=True)
         except Exception:
             log.exception("Startbericht konnte nicht geschrieben werden")
         last_hb = time.monotonic()
@@ -662,17 +798,26 @@ class Runner:
                     self.event("FEHLER", "Durchlauf", error)
                 try:
                     self.write_snapshot(error)
+                    self.log_equity()
                 except Exception:
                     log.exception("Datenstand für die Oberfläche konnte nicht geschrieben werden")
                 try:
                     self.maybe_report()
+                    self.periodic_summary()
                 except Exception:
                     log.exception("Bericht konnte nicht geschrieben werden")
                 if time.monotonic() - last_hb >= self.cfg.HEARTBEAT_MINUTES * 60:
                     self.heartbeat()
                     last_hb = time.monotonic()
-                time.sleep(self.cfg.POLL_SECONDS)
+                self.pump(self.cfg.POLL_SECONDS)
         except KeyboardInterrupt:
             log.info("Bot gestoppt. Offene Positionen sind durch Stop-Loss/Take-Profit beim Broker gesichert.")
+            if self.tg is not None:
+                try:
+                    self.tg.api.call("sendMessage", {"chat_id": self.tg.chat_id, "text": "MT5-Bot gestoppt (Positionen bleiben durch Stop/Ziel beim Broker gesichert)."}, timeout=5)
+                except Exception:
+                    pass
         finally:
+            if self.tg is not None:
+                self.tg.stop()
             self.mt5.shutdown()
