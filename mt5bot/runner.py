@@ -122,8 +122,9 @@ class Runner:
     # ---------- Daten & Positionen ----------
     def closed_bars(self, name: str, tf: str) -> pd.DataFrame | None:
         sym = self.symbols.get(name)
-        if sym is None:
-            return None
+        return None if sym is None else self.closed_bars_raw(sym, tf)
+
+    def closed_bars_raw(self, sym: str, tf: str) -> pd.DataFrame | None:
         rates = self.mt5.copy_rates_from_pos(sym, self.tf[tf], 0, self.cfg.BARS_HISTORY)
         if rates is None or len(rates) < 10:
             return None
@@ -132,6 +133,21 @@ class Runner:
         df = df.set_index("time")
         df["volume"] = df["tick_volume"] if "tick_volume" in df else 1.0
         return df[["open", "high", "low", "close", "volume"]].iloc[:-1]  # letzte Zeile = laufende Kerze
+
+    def all_positions(self):
+        """Alle Positionen des Kontos – auch von anderen Bots oder manuell (nur zur Anzeige, verwaltet werden nur eigene)."""
+        return list(self.mt5.positions_get() or [])
+
+    def bot_name(self, magic: int) -> tuple[str, bool]:
+        """(Anzeigename, gehört zu diesem Prozess?) anhand der Magic Number."""
+        own = next((p for p in self.profiles if p["magic"] == magic), None)
+        if own:
+            return own["name"], True
+        cfgp = next((p for p in self.cfg.PROFILES if p["magic"] == magic), None)
+        if cfgp:
+            return f"{cfgp['name']} (extern)", False
+        known = getattr(self.cfg, "KNOWN_BOTS", {}).get(magic)
+        return (known, False) if known else (("manuell", False) if magic == 0 else (f"Magic {magic}", False))
 
     def positions(self, magic: int | None = None, name: str | None = None):
         pos = self.mt5.positions_get() or []
@@ -282,7 +298,7 @@ class Runner:
         """Merkt sich je Position Einstieg, Anfangs-Stop (= 1R), Eröffnungszeit und den besten Kurs seither."""
         now = now or datetime.now(timezone.utc)
         rec = self.state.setdefault("trades", {})
-        live = {str(p.ticket): p for p in self.positions()}
+        live = {str(p.ticket): p for p in self.all_positions()}
         for t in [t for t in rec if t not in live]:
             del rec[t]
         for t, pos in live.items():
@@ -336,11 +352,11 @@ class Runner:
         self.track_positions(now)  # auch eben erst eröffnete Positionen erfassen
         acc = mt5.account_info()
         positions = []
-        for pos in self.positions():
-            prof = self.profile_of(pos) or {}
-            name = self._market_of(prof, pos) if prof else None
-            tf = prof.get("markets", {}).get(name, "D1") if name else "D1"
-            df = self.closed_bars(name, tf) if name else None
+        for pos in self.all_positions():
+            prof = self.profile_of(pos) or next((p for p in self.cfg.PROFILES if p["magic"] == pos.magic), {})
+            label, own = self.bot_name(pos.magic)
+            tf = next((t for n, t in prof.get("markets", {}).items() if n == pos.symbol or self.symbols.get(n) == pos.symbol), "H4")
+            df = self.closed_bars_raw(pos.symbol, tf)
             rec = self.state.get("trades", {}).get(str(pos.ticket), {})
             r_now, r_max = self.r_values(pos)
             price = self._price(pos)
@@ -354,7 +370,7 @@ class Runner:
             tail = df.iloc[-120:] if df is not None else None
             opened = rec.get("opened")
             positions.append({
-                "ticket": pos.ticket, "symbol": pos.symbol, "profile": prof.get("name", "?"), "tf": tf,
+                "ticket": pos.ticket, "symbol": pos.symbol, "profile": label, "own": own, "magic": pos.magic, "tf": tf,
                 "direction": "long" if pos.type == mt5.POSITION_TYPE_BUY else "short", "volume": pos.volume,
                 "entry": rec.get("entry", pos.price_open), "sl0": rec.get("sl0"), "sl": pos.sl, "tp": pos.tp, "price": price,
                 "profit": float(getattr(pos, "profit", 0.0)), "r": r_now, "max_r": r_max,
@@ -460,8 +476,10 @@ class Runner:
         self.connect()
         if getattr(self.cfg, "DASHBOARD_PORT", 0):
             from .dashboard import serve
-            url = serve(self.folder, self.cfg.DASHBOARD_PORT, self.cfg.SNAPSHOT_FILE)
-            log.info(f"Oberfläche: {url}  (nur auf diesem PC erreichbar)")
+            info = serve(self.folder, self.cfg.DASHBOARD_PORT, self.cfg.SNAPSHOT_FILE, lan=getattr(self.cfg, "DASHBOARD_PHONE", False))
+            log.info(f"Oberfläche: {info['local']}")
+            for u in info["phone"]:
+                log.info(f"Auf dem Handy (gleiches WLAN oder Tailscale): {u}   <- Link geheim halten, er enthält den Zugangsschlüssel")
         self.heartbeat()
         last_hb = time.monotonic()
         try:

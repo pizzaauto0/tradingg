@@ -16,6 +16,14 @@ Kopfzeile mit Uhrzeit Deutschland/New York, Kapital, Tagesgewinn, letztem Durchl
 je offener Position eine Karte mit Kerzenchart, Einstieg, Stop, Ziel, 52-Wochen-Hoch, R-Vielfaches (Gewinn in Einheiten des
 Anfangsrisikos), Prozent, Tagen und MaxR (bestes R seit Einstieg); darunter der Zustand jedes Marktes. Aktualisiert alle 15 s.
 Optional je Profil: `breakeven_at_r` (Stop ab +xR auf Einstand, Anzeige „Trail: BE") und `max_days` (Zeit-Stopp).
+Die Oberfläche zeigt **alle Positionen des Kontos**: eigene Profile, deine anderen Bots (Name über `KNOWN_BOTS` bzw. die Magic Number, Schild in Orange) und manuelle Trades. Verwaltet und geschlossen werden nur die eigenen.
+
+**Auf dem Handy:** Mit `DASHBOARD_PHONE = True` steht beim Start im Log (und oben auf der Seite am PC) ein Link wie `http://192.168.x.x:8765/?key=...`.
+Handy im **gleichen WLAN** → Link öffnen. Windows fragt beim ersten Start nach der Firewall: „Private Netzwerke" erlauben.
+Unterwegs: **Tailscale** (kostenlos) auf PC und Handy installieren und gleich anmelden, dann den Link mit der Tailscale-Adresse (100.x.x.x) öffnen.
+Keine Portfreigabe im Router einrichten – die Seite ist unverschlüsselt (HTTP) und gehört nicht offen ins Internet.
+Ohne Schlüssel kommt niemand hinein; Schlüssel ändern: `mt5bot_dashboard_key.txt` löschen und Bot neu starten.
+
 Einzeln starten (wenn der Bot schon läuft): `python -m mt5bot.dashboard`. Port ändern/abschalten: `DASHBOARD_PORT` in der Konfiguration.
 
 ## Profile (`mt5bot/config.py`, `enabled` ein-/ausschalten)

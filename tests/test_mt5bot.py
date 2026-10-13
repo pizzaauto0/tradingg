@@ -227,7 +227,7 @@ def test_snapshot_breakeven_timestop_and_dashboard(tmp_path):
     snap = json.loads((tmp_path / "mt5bot_snapshot.json").read_text(encoding="utf-8"))
     assert snap["positions"][0]["breakeven"] and snap["positions"][0]["max_r"] > 1
 
-    url = serve(tmp_path, 0, open_browser=False)  # Port 0 = freier Port
+    url = serve(tmp_path, 0, open_browser=False)["local"]  # Port 0 = freier Port
     assert url.startswith("http://127.0.0.1:")
     html = urllib.request.urlopen(url).read().decode()
     assert "OFFENE POSITIONEN" in html
@@ -238,3 +238,50 @@ def test_snapshot_breakeven_timestop_and_dashboard(tmp_path):
     r.state["trades"][str(pos.ticket)]["opened"] = old
     r.manage_open()                             # Zeit-Stopp nach 40 Tagen
     assert not mt5.positions
+
+
+def test_foreign_positions_are_shown_but_not_managed(tmp_path):
+    import json
+    r, mt5 = run_signal(tmp_path)
+    mt5.positions.append(Pos(999, "XAUUSD", 0, 0.05, 1.0, 999.0, 100001, 5.0, 150.0))   # Position des Beispiel-Bots 1
+    mt5.positions.append(Pos(998, "EURUSD", 1, 0.10, 0.0, 0.0, 0, -2.0, 1.1))            # manuell, ohne Daten
+    mt5.data["EURUSD"] = bars(np.linspace(1.0, 1.1, 400))
+    r.write_snapshot()
+    snap = json.loads((tmp_path / "mt5bot_snapshot.json").read_text(encoding="utf-8"))
+    names = {p["ticket"]: (p["profile"], p["own"]) for p in snap["positions"]}
+    assert names[999] == ("1-Haupt-Bot", False) and names[998] == ("manuell", False)
+    assert sum(own for _, own in names.values()) == 1
+    (tmp_path / "KILL_SWITCH").write_text("")
+    r.step()                                   # Kill-Switch schließt nur die eigenen Positionen
+    assert {p.ticket for p in mt5.positions} == {999, 998}
+
+
+def test_phone_access_requires_key(tmp_path):
+    import urllib.error
+    import urllib.request
+
+    from mt5bot.dashboard import local_addresses, serve
+
+    (tmp_path / "mt5bot_snapshot.json").write_text('{"positions": []}', encoding="utf-8")
+    info = serve(tmp_path, 0, open_browser=False, lan=True)
+    try:
+        key = (tmp_path / "mt5bot_dashboard_key.txt").read_text(encoding="utf-8")
+        assert len(key) >= 16 and all(f"key={key}" in u for u in info["phone"])
+        assert urllib.request.urlopen(info["local"] + "api/snapshot").status == 200   # am PC ohne Schlüssel
+        assert key in urllib.request.urlopen(info["local"] + "api/phone").read().decode()
+        ips = local_addresses()
+        if not ips:
+            pytest.skip("keine Netzwerkadresse in dieser Umgebung")
+        port = info["server"].server_address[1]
+        base = f"http://{ips[0]}:{port}/"
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # direkt, nicht über einen Proxy
+        with pytest.raises(urllib.error.HTTPError) as e:
+            opener.open(base + "api/snapshot")
+        assert e.value.code == 403
+        with pytest.raises(urllib.error.HTTPError):
+            opener.open(base + "api/snapshot?key=falsch")
+        with pytest.raises(urllib.error.HTTPError):
+            opener.open(base + f"api/phone?key={key}")           # Handy-Link wird nur am PC verraten
+        assert opener.open(base + f"api/snapshot?key={key}").status == 200
+    finally:
+        info["server"].shutdown()

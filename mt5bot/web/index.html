@@ -50,6 +50,9 @@
   td, th { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
   th { color: var(--muted); font-weight: 500; font-size: 11px; letter-spacing: .06em; }
   .section { margin-top: 30px; }
+  .phone { margin-bottom: 16px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--muted); }
+  .phone code { color: var(--fg); word-break: break-all; user-select: all; }
+  .badge.ext { border-color: #9e6a03; color: #d29922; background: rgba(187,128,9,.12); }
   .title { flex-wrap: wrap; gap: 6px 16px; } #profiles { word-break: break-all; } td { word-break: break-word; }
   @media (max-width: 600px) { header { gap: 14px; padding: 12px 16px; } main { padding: 14px 16px 30px; } .grid { grid-template-columns: 1fr; } .sep { display: none; } }
 </style>
@@ -68,6 +71,7 @@
 </header>
 <main>
   <div id="banner"></div>
+  <div id="phone"></div>
   <div class="title"><span>OFFENE POSITIONEN</span><span id="count"></span></div>
   <div class="grid" id="cards"></div>
   <div class="section">
@@ -86,12 +90,13 @@ const tz = (z) => new Intl.DateTimeFormat("de-DE", { timeZone: z, hour: "2-digit
 const deFmt = tz("Europe/Berlin"), nyFmt = tz("America/New_York");
 const shortTime = (iso) => (iso ? new Date(iso).toLocaleString("de-DE", { timeZone: "Europe/Berlin", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "–");
 let snap = null;
+const KEY = (() => { const k = new URLSearchParams(location.search).get("key"); return k ? `?key=${encodeURIComponent(k)}` : ""; })();
 
 setInterval(() => { const d = new Date(); $("de").textContent = deFmt.format(d); $("ny").textContent = nyFmt.format(d); }, 1000);
 
 async function load() {
   try {
-    const r = await fetch("/api/snapshot", { cache: "no-store" });
+    const r = await fetch("/api/snapshot" + KEY, { cache: "no-store" });
     snap = await r.json();
     if (!r.ok) throw new Error(snap.error || r.status);
     render();
@@ -145,6 +150,7 @@ function card(p) {
   const c = h("div", "card"), top = h("div", "top");
   top.append(h("span", "sym", p.symbol), h("span", p.direction === "short" ? "badge short" : "badge", p.direction === "short" ? "SHORT" : "OPEN"));
   if (p.breakeven) top.append(h("span", "badge be", "Trail: BE"));
+  if (p.own === false) top.append(h("span", "badge ext", p.profile));
   const pct = (p.direction === "short" ? -1 : 1) * (p.price / p.entry - 1) * 100;
   const rb = h("div", "rbox"), rv = h("div");
   const r = h("span", `r ${p.r == null ? "" : p.r >= 0 ? "pos" : "neg"}`, p.r == null ? "–" : `${signed(p.r)}R`);
@@ -212,6 +218,13 @@ function draw(cv, p) {
 }
 
 $("refresh").onclick = load;
+// Nur am PC selbst: Link fürs Handy anzeigen (der Server liefert ihn nur an 127.0.0.1)
+fetch("/api/phone").then((r) => (r.ok ? r.json() : null)).then((d) => {
+  if (!d || !d.urls.length) return;
+  const box = h("div", "phone", "Auf dem Handy öffnen (gleiches WLAN oder Tailscale) – Link geheim halten, er enthält den Zugangsschlüssel: ");
+  d.urls.forEach((u, i) => { if (i) box.append("  ·  "); box.append(h("code", null, u)); });
+  $("phone").replaceChildren(box);
+}).catch(() => {});
 addEventListener("resize", () => snap && render());
 load();
 setInterval(load, 15000);
