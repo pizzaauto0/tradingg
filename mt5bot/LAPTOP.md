@@ -3,7 +3,8 @@
 Voraussetzung: Windows 10/11, **64-Bit**. Das Paket `MetaTrader5` gibt es nur für Windows.
 
 ## 1. Programme installieren
-1. **Python** von https://www.python.org/downloads/ (3.11 oder neuer, 64-Bit). Beim Installieren unten **„Add python.exe to PATH"** ankreuzen.
+1. **Python 3.13 (64-Bit)** von https://www.python.org/downloads/windows/ – unter „Python 3.13.x" den „Windows installer (64-bit)". Beim Installieren **„Add python.exe to PATH"** und „py launcher" angekreuzt lassen.
+   **Wichtig:** Das Paket `MetaTrader5` gibt es nur für **Python 3.10 bis 3.13**. Mit 3.14/3.15 scheitert die Installation („No matching distribution found for MetaTrader5"). Eine neuere Python-Version darf zusätzlich installiert bleiben – das Einrichtungsskript sucht die passende selbst.
 2. **Git** von https://git-scm.com/download/win (alles auf Standard lassen) – oder statt Git das Projekt als ZIP laden (Schritt 2).
 3. **MetaTrader 5** von der Webseite deines Brokers installieren und ein **Demo-Konto** einloggen (Datei → Konto eröffnen/Anmelden).
    In MetaTrader oben auf **„Algo-Handel"** klicken (grün) und unter Extras → Optionen → Experten „Algo-Handel erlauben" aktivieren.
@@ -18,7 +19,8 @@ cd tradingg
 Ohne Git: https://github.com/pizzaauto0/tradingg/tree/claude/great-bell-6lgr1f → Code → Download ZIP, entpacken, im Ordner ein Terminal öffnen.
 
 ## 3. Einrichten
-Doppelklick auf **`mt5bot\setup_laptop.bat`** (oder im Terminal `mt5bot\setup_laptop.bat`). Es prüft Python, installiert die Pakete und macht einen Selbsttest.
+Doppelklick auf **`mt5bot\setup_laptop.bat`** (oder im Terminal `mt5bot\setup_laptop.bat`). Es sucht Python 3.10–3.13, legt eine eigene Umgebung `.venv` an, installiert die Pakete und macht einen Selbsttest.
+**Ab jetzt immer `mt5bot\py.bat` statt `python` benutzen** (damit die richtige Umgebung verwendet wird).
 
 ## 4. Konfiguration prüfen (`mt5bot\config.py`, mit dem Editor öffnen)
 - `ALLOW_REAL_ACCOUNT = False` lassen (nur Demo).
@@ -27,16 +29,16 @@ Doppelklick auf **`mt5bot\setup_laptop.bat`** (oder im Terminal `mt5bot\setup_la
 - Profile: `video` ist an, die anderen aus.
 
 ## 5. Telegram (optional, empfohlen)
-`python -m mt5bot.telegram_setup` – Anleitung erscheint im Fenster (Bot bei @BotFather anlegen, Token eingeben, dem Bot schreiben).
+`mt5bot\py.bat -m mt5bot.telegram_setup` – Anleitung erscheint im Fenster (Bot bei @BotFather anlegen, Token eingeben, dem Bot schreiben).
 
 ## 6. Starten
 ```
-python -m mt5bot.run
+mt5bot\py.bat -m mt5bot.run
 ```
 Das Portal öffnet sich im Browser (http://127.0.0.1:8765). Im Terminal siehst du „Verbunden: Konto … DEMO". Stoppen: Strg+C.
 
 ## 7. Dauerbetrieb auf dem Laptop
-- `python -m mt5bot.autostart install`: startet den Bot beim Anmelden und nach Abstürzen neu. Windows muss sich nach einem Neustart automatisch anmelden (sonst startet nichts).
+- `mt5bot\py.bat -m mt5bot.autostart install`: startet den Bot beim Anmelden und nach Abstürzen neu. Windows muss sich nach einem Neustart automatisch anmelden (sonst startet nichts).
 - **Ruhezustand ausschalten:** Einstellungen → System → Netzbetrieb & Akku → „Bildschirm und Energiesparmodus": bei **Netzbetrieb** „Nie" für den Energiesparmodus.
 - **Deckel zu:** Einstellungen → System → Netzbetrieb → „Weitere Energieeinstellungen" → „Auswählen, was beim Zuklappen des Computers geschehen soll" → bei Netzbetrieb **„Nichts unternehmen"**.
 - Laptop **am Netzteil** lassen. WLAN darf nicht abschalten (Gerätemanager → Netzwerkadapter → WLAN → Energieverwaltung: „Computer darf Gerät ausschalten" abwählen).

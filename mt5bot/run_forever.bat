@@ -9,7 +9,11 @@ rem Nach dem Anmelden kurz warten, bis Netzwerk und Terminal bereit sind
 timeout /t 30 /nobreak >nul
 
 :loop
-python -m mt5bot.run
+if exist .venv\Scripts\python.exe (
+    .venv\Scripts\python.exe -m mt5bot.run
+) else (
+    python -m mt5bot.run
+)
 set CODE=%errorlevel%
 echo %date% %time% Bot beendet mit Code %CODE% >> logs\neustarts.log
 if %CODE%==3 (

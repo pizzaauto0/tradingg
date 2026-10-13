@@ -11,6 +11,10 @@ echo MetaTrader 5 muss laufen, Demo-Konto eingeloggt und "Algo-Handel" gruen sei
 echo Stoppen: Strg + C  (Stop-Loss/Take-Profit bleiben beim Broker aktiv)
 echo Notaus: leere Datei KILL_SWITCH im Projektordner anlegen.
 echo.
-python -m mt5bot.run
+if exist .venv\Scripts\python.exe (
+    .venv\Scripts\python.exe -m mt5bot.run
+) else (
+    python -m mt5bot.run
+)
 echo.
 pause
