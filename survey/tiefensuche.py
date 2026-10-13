@@ -243,7 +243,7 @@ def main() -> int:
                 break
         fin_chunks = [finalists[i::n_workers] for i in range(n_workers)]
         stress = {spec_key(s): out for chunk in ex.map(eval_batch, [(c, (2.0,)) for c in fin_chunks]) for s, out in chunk}
-        nb_specs = {spec_key(f): neighbors(f) for f in finalists[:10]}
+        nb_specs = {spec_key(f): neighbors(f) for f in finalists}  # Nachbar-Prüfung für ALLE Finalisten
         flat = [n for v in nb_specs.values() for n in v]
         nb_chunks = [flat[i::n_workers] for i in range(n_workers)]
         nb_out = {spec_key(s): out for chunk in ex.map(eval_batch, [(c, (1.0,)) for c in nb_chunks]) for s, out in chunk}
@@ -262,7 +262,7 @@ def main() -> int:
         ok_test = te["pf"] >= 1.10 and te["plus"] >= 60 and te["trades"] >= 100 and te["ret"] > 0 and te["markets"] >= 12
         ok_stress = st is not None and st["pf"] >= 1.0 and st["ret"] > 0
         ok_nb = nb_pf is not None and nb_pf >= 1.05
-        verdict = "KANDIDAT" if ok_test and ok_stress and (ok_nb or nb_pf is None) else ("WACKELIG" if ok_test else "VERWORFEN")
+        verdict = "KANDIDAT" if ok_test and ok_stress and ok_nb else ("WACKELIG" if ok_test else "VERWORFEN")
         rows.append((spec, tr, te, st, nb_pf, verdict, ok_test, ok_stress, ok_nb))
         if verdict == "KANDIDAT":
             candidates.append({"type": spec["type"], "params": spec["params"], "train_pf": round(tr["pf"], 2), "test_pf": round(te["pf"], 2),

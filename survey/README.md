@@ -41,3 +41,11 @@ die Besten werden danach auf dem **unbekannten Testteil** geprüft, mit **doppel
 Ergebnis: `survey/out/tiefensuche_1d/ergebnisse.txt` (mit Ehrlichkeits-Check: wie viel vom Trainings-Spitzenwert im Test übrig bleibt), `kandidaten.json`, `alle_konfigurationen.csv`.
 Mehr Suchzeit: `--minutes 40`. Zwischenstand und Abbruch: Strg+C wertet das bisher Gefundene aus. Andere Zeitrahmen: `--interval 4h` (Daten: 2 Jahre).
 Gefundene Kandidaten danach wie jede neue Strategie durch `STRATEGIE_CHECKLISTE.md` schicken (zweiter Zeitraum, `survey.pruefen`, Demo-Abnahme).
+
+## Nachprüfung der Kandidaten (Ist der Erfolg echt?)
+```
+python -m survey.nachpruefen --interval 1d
+```
+Liest `kandidaten.json` der Tiefensuche und prüft über die ganze Reihe: **Edge gegen Zufalls-Einstiege** (gleiche Ausstiege, zufällige Einstiege), **Jahre im Plus**,
+**Trades je Markt und Jahr**, Drawdown und **Parameter-Nachbarn**. Urteil: ROBUST / ROBUST, ABER SELTEN / SCHWACH. Ergebnis: `survey/out/nachpruefung_1d/ergebnisse.txt`.
+Hintergrund: Ist der Testzeitraum für Kauf-Strategien günstig, sind auch Zufalls-Einstiege profitabel; nur der Abstand dazu zählt als echter Beitrag der Strategie.
