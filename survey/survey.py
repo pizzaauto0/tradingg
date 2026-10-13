@@ -95,9 +95,9 @@ def stats_from_equity(eq: pd.Series, bars_per_year: float) -> dict[str, float]:
 
 def run_market(args: tuple) -> list[dict]:
     """Alle Strategien auf einem Markt (läuft in einem eigenen Prozess)."""
-    cls, name, df, interval, cfg_path, specs = args
+    cls, name, df, interval, cfg_path, specs, cost_mult = args
     cfg = load_config(cfg_path)
-    fee, slip = COSTS[cls]
+    fee, slip = (c * cost_mult for c in COSTS[cls])  # Kostenstress: z. B. doppelte Gebühren und Slippage
     cfg = dataclasses.replace(cfg, market=dataclasses.replace(cfg.market, timeframe=interval),
                               costs=dataclasses.replace(cfg.costs, fee_pct=fee, slippage_pct=slip))
     years = max((df.index[-1] - df.index[0]).days / 365.25, 0.1)
@@ -168,10 +168,11 @@ def main() -> int:
     ap.add_argument("--config", default=str(ROOT / "config.yaml"))
     ap.add_argument("--demo", action="store_true", help="Zufallsdaten statt Download (nur Funktionstest, Ergebnisse bedeutungslos)")
     ap.add_argument("--years", type=float, default=0, help="nur die letzten N Jahre testen (z. B. 2: Tageskerzen im selben Zeitraum wie der 1h-Test)")
+    ap.add_argument("--cost-mult", type=float, default=1.0, help="Gebühren und Slippage mit diesem Faktor multiplizieren (Kostenstress, z. B. 2)")
     ap.add_argument("--video", action="store_true", help="nur die Video-Methode (ma_pullback) in 12 Varianten testen")
     ap.add_argument("--limit", type=int, default=0, help="nur die ersten N Märkte (Test)")
     a = ap.parse_args()
-    out = Path(__file__).parent / "out" / (("demo_" if a.demo else "") + a.interval + (f"_{a.years:g}y" if a.years else "") + ("_video" if a.video else ""))
+    out = Path(__file__).parent / "out" / (("demo_" if a.demo else "") + a.interval + (f"_{a.years:g}y" if a.years else "") + ("_video" if a.video else "") + (f"_x{a.cost_mult:g}" if a.cost_mult != 1 else ""))
     out.mkdir(parents=True, exist_ok=True)
     cache = Path(__file__).parent / "cache"
     min_trades = a.min_trades or {"1d": 15, "4h": 25, "1h": 30, "1wk": 8}[a.interval]
@@ -191,7 +192,7 @@ def main() -> int:
         if df is None or len(df) < WARMUP + (200 if not a.years else 100):
             missing.append(f"{name} ({ticker}): {'keine Daten' if df is None else f'nur {len(df)} Kerzen'}")
             continue
-        jobs.append((cls, name, df, a.interval, a.config, specs))
+        jobs.append((cls, name, df, a.interval, a.config, specs, a.cost_mult))
     (out / "fehlend.txt").write_text("\n".join(missing) or "alle Märkte geladen", encoding="utf-8")
     if not jobs:
         print("Keine Daten geladen – Internetverbindung / yfinance prüfen (pip install yfinance).")

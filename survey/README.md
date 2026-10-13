@@ -21,3 +21,13 @@ Grenzen: nur Long (kein Leerverkauf), Yahoo-Daten (angepasste Kurse, bei Futures
 python survey/pick.py --interval 1d
 ```
 Liest `alle_laeufe.csv` und schreibt `survey/out/1d/markt_auswahl.txt`: je Strategie die Märkte, auf denen sie in beiden Zeithälften Gewinn machte (Profitfaktor >= 1,2, genug Trades), plus eine Liste der Märkte, die zu den meisten Strategien passen. Hinweis: Märkte nachträglich nach den besten Zahlen auszusuchen überschätzt den Edge; deshalb zählt nur „robust" in beiden Hälften.
+
+## Strategien prüfen (Aufnahme-Checkliste)
+Regeln: `STRATEGIE_CHECKLISTE.md` im Projektordner. Automatisch:
+```
+python survey/survey.py --interval 1d
+python survey/survey.py --interval 1d --years 2
+python survey/survey.py --interval 1d --cost-mult 2        (Kostenstress: doppelte Gebühren)
+python -m survey.pruefen --runs 1d 1d_2y --stress 1d_x2
+```
+Ergebnis: `survey/out/pruefung.txt` mit ✔/✘ je Regel und dem Urteil ÜBERNEHMEN / BEOBACHTEN / ABLEHNEN.
