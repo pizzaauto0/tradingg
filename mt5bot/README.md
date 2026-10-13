@@ -51,7 +51,12 @@ Jedes Profil braucht eine **eigene Magic Number**; so verwalten mehrere Profile 
 Token eingeben (Eingabe unsichtbar), dem neuen Bot eine Nachricht schicken – das Programm findet deine Chat-ID selbst und speichert beides in `mt5bot_telegram.json` (nur lokal).
 Den Token nie in Chats posten; bei Verdacht in `@BotFather` → `/revoke`. Bot neu starten.
 
-| Befehl | Wirkung |
+**Klick-Menü:** Beim ersten `/start` (oder `/menu`) erscheinen unten im Chat feste Tasten: 📊 Status · 📋 Trades · 🟢 Kaufen · 🔴 Verkaufen · 📈 Märkte · 🧾 Statistik · ⏸ Pause · ▶ Weiter · ❌ Alle schließen · 🛑 Not-Aus · 📄 Bericht · 🔔 Log.
+- **📋 Trades** zeigt jeden offenen Trade mit einem Knopf → Details mit Begründung und **✖ Trade schließen**.
+- **🟢 Kaufen / 🔴 Verkaufen** → Markt wählen → Risiko wählen (0,25 / 0,5 / 1 / 2 %) → Vorschau mit Lotgröße, Stop und Ziel → **✅ Ja, ausführen**.
+- Jede Rückfrage hat die Knöpfe „Ja, ausführen / Abbrechen" (60 s gültig); alte oder doppelt gedrückte Knöpfe tun nichts.
+
+| Befehl (geht weiterhin auch per Text) | Wirkung |
 |---|---|
 | `/status` `/trades` `/trade <Nr>` | Konto, alle offenen Trades, ein Trade mit Begründung („warum gekauft") |
 | `/markets` `/stats` `/log` `/report` | Zustand der Märkte, Kennzahlen (Woche/Monat/je Profil), letzte Ereignisse, Bericht jetzt |
@@ -62,6 +67,12 @@ Den Token nie in Chats posten; bei Verdacht in `@BotFather` → `/revoke`. Bot n
 Automatisch aufs Handy: jeder Kauf (mit den ✔/✘-Bedingungen), jeder Verkauf (mit Grund und Ergebnis), Fehler, Limits, alle 6 Stunden ein Kurzbericht (`TELEGRAM_REPORT_HOURS`).
 Sicherheit: antwortet nur auf deine Chat-ID, alte Nachrichten aus der Zeit vor dem Start werden ignoriert, manuelle Trades respektieren Positions- und Tageslimit und das 2-%-Risikomaximum.
 `/sell` neben einem offenen Kauf im selben Markt braucht ein **Hedging-Konto** (bei Netting-Konten würde es die Position verringern statt eine zweite zu öffnen).
+
+## Klick-Steuerung im Portal
+Über der Positionsliste: **🟢 Kaufen · 🔴 Verkaufen · ⏸ Pause/▶ Weiter · ❌ Alle schließen · 🛑 Not-Aus**, dazu bei jedem Trade **✖ Schließen**. Jede Aktion fragt in einem Fenster nach, der Bot führt sie in der Hauptschleife aus, das Ergebnis erscheint als Meldung.
+`DASHBOARD_CONTROL` in `config.py`: `"local"` (Standard) = Knöpfe nur am PC selbst, vom Handy nur Ansehen; `"phone"` = auch vom Handy – **dann kann jeder mit dem Link handeln**, nur mit Tailscale und geheimem Link verwenden; `"off"` = nur Ansehen.
+Schutz vor fremden Webseiten: jede Aktion braucht ein geheimes Seiten-Token, prüft Host und Herkunft und akzeptiert nur feste, geprüfte Befehle (Symbol aus deiner Liste, Risiko höchstens 2 %).
+Für unterwegs ist Telegram die bessere Wahl (nur deine Chat-ID, Bestätigung per Knopf).
 
 ## Autostart (Windows)
 `python -m mt5bot.autostart install` – legt im Autostart-Ordner eine Startdatei an (kein Administrator nötig). Beim Anmelden startet der Bot minimiert,

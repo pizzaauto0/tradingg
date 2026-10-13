@@ -14,6 +14,8 @@ import json
 import logging
 import math
 import os
+import queue
+import secrets
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -47,6 +49,8 @@ class Runner:
         self.errors_since_report: list[str] = []
         self.tg = None
         self.last_equity_log = 0.0
+        self.web_cmds: queue.Queue = queue.Queue()
+        self.web_results: dict[str, dict] = {}
         self.symbols: dict[str, str] = {}      # Konfig-Name -> Broker-Name
         self.last_bar: dict[tuple, object] = {}
         self.halted_day: str | None = None
@@ -71,6 +75,97 @@ class Runner:
         d = self._path(getattr(self.cfg, "LOG_DIR", "logs"))
         d.mkdir(parents=True, exist_ok=True)
         return d
+
+    # ---------- Aktionen (gemeinsam für Telegram und Portal; jede gibt einen lesbaren Ergebnistext zurück) ----------
+    def do_close(self, ticket: int, why: str) -> str:
+        pos = next((p for p in self.all_positions() if p.ticket == ticket), None)
+        if pos is None:
+            return f"Trade #{ticket} nicht gefunden (schon geschlossen?)."
+        if pos.magic not in {p["magic"] for p in self.profiles} | self.manual_magics():
+            return f"Trade #{ticket} gehört nicht zu diesem Bot – bitte im MetaTrader schließen."
+        return f"#{ticket} {pos.symbol} geschlossen." if self.close(pos, why) else f"#{ticket}: SCHLIESSEN FEHLGESCHLAGEN – siehe Log/MetaTrader."
+
+    def do_closeall(self, why: str) -> str:
+        poss = self.positions()
+        n = sum(self.close(p, why) for p in poss)
+        return f"{n} von {len(poss)} Trade(s) geschlossen."
+
+    def do_kill(self, why: str) -> str:
+        poss = self.positions()
+        self.state["paused"] = True
+        self._save_state()
+        n = sum(self.close(p, why) for p in poss)
+        self.event("LIMIT", "Not-Aus", f"{why}: {n} Trade(s) geschlossen, Bot pausiert")
+        return f"NOT-AUS: {n} von {len(poss)} Trade(s) geschlossen, neue Trades pausiert."
+
+    def do_pause(self, paused: bool, why: str) -> str:
+        self.state["paused"] = paused
+        self._save_state()
+        self.event("LIMIT", "Pause" if paused else "Fortsetzen", f"{why}: " + ("keine neuen automatischen Trades" if paused else "neue Trades wieder erlaubt"))
+        return "PAUSIERT: keine neuen automatischen Trades (offene Positionen bleiben mit Stop/Ziel bestehen)." if paused else "Neue Trades wieder erlaubt."
+
+    def check_manual_open(self, name: str, risk: float) -> str | None:
+        """Gibt einen Ablehnungsgrund zurück oder None, wenn manuell eröffnet werden darf."""
+        if self.manual_profile() is None:
+            return "Manuelles Eröffnen ist abgeschaltet (MANUAL['enabled'] in der Konfiguration)."
+        if name not in self.symbols:
+            return f"Symbol {name} nicht verfügbar. Verfügbar: {', '.join(sorted(self.symbols))}"
+        if not 0 < risk <= 2:
+            return "Risiko muss größer 0 und höchstens 2 % sein."
+        if not self.day_check():
+            return "Tagesverlust-Limit erreicht – keine neuen Trades."
+        if len(self.positions()) >= self.cfg.MAX_OPEN_POSITIONS:
+            return f"Maximal {self.cfg.MAX_OPEN_POSITIONS} Positionen gleichzeitig – erst eine schließen."
+        return None
+
+    def manual_prof(self, name: str, risk: float) -> dict:
+        man = self.manual_profile()
+        return {**man, "risk_percent": risk, "markets": {name: man["timeframe"]}}
+
+    def do_open(self, direction: str, name: str, risk: float, source: str) -> str:
+        bad = self.check_manual_open(name, risk)
+        if bad:
+            return bad
+        ok = self.place(self.manual_prof(name, risk), name, direction, f"Manuell eröffnet ({source}, kein Strategie-Signal)")
+        return f"{direction.upper()} {name} eröffnet." if ok else f"{name}: Order NICHT ausgeführt – Details im Log."
+
+    # ---------- Befehle aus dem Portal (Warteschlange, ausgeführt in der Hauptschleife) ----------
+    def submit_web_command(self, cmd: dict) -> str:
+        cid = secrets.token_hex(6)
+        self.web_results[cid] = {"done": False, "text": "wartet …"}
+        self.web_cmds.put((cid, cmd))
+        if len(self.web_results) > 200:  # alte Ergebnisse aufräumen
+            for k in list(self.web_results)[:100]:
+                self.web_results.pop(k, None)
+        return cid
+
+    def process_web_commands(self) -> None:
+        while True:
+            try:
+                cid, cmd = self.web_cmds.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                t = cmd.get("type")
+                if t == "close":
+                    text = self.do_close(int(cmd["ticket"]), "Portal: Klick")
+                elif t == "closeall":
+                    text = self.do_closeall("Portal: Klick (alle)")
+                elif t == "kill":
+                    text = self.do_kill("Portal: Klick (Not-Aus)")
+                elif t == "pause":
+                    text = self.do_pause(True, "Portal")
+                elif t == "resume":
+                    text = self.do_pause(False, "Portal")
+                elif t in ("buy", "sell"):
+                    text = self.do_open("long" if t == "buy" else "short", str(cmd["symbol"]).upper(), float(cmd.get("risk", 0.5)), "Portal")
+                else:
+                    text = "Unbekannter Befehl."
+            except Exception as e:  # ein Befehl darf den Bot nie stoppen
+                log.exception("Portal-Befehl fehlgeschlagen")
+                text = f"Fehler: {type(e).__name__}: {e}"
+            self.web_results[cid] = {"done": True, "text": text}
+            self.write_snapshot()  # Anzeige sofort aktualisieren
 
     def tg_notify(self, text: str) -> None:
         if self.tg is not None:
@@ -631,6 +726,7 @@ class Runner:
                                                   "currency": acc.currency, "demo": acc.trade_mode == mt5.ACCOUNT_TRADE_MODE_DEMO},
             "start_equity": self.state.get("start_equity"), "halted": self.halted_day is not None, "kill": self.kill_requested(),
             "paused": bool(self.state.get("paused")), "telegram": self.tg is not None,
+            "symbols": sorted(self.symbols), "manual": self.manual_profile() is not None and {"risk": self.manual_profile()["risk_percent"]},
             "max_positions": self.cfg.MAX_OPEN_POSITIONS, "profiles": [{"name": p["name"], "strategy": p["strat"].name} for p in self.profiles],
             "next_bar": self._next_bar_time(), "positions": positions, "markets": self._status,
         }
@@ -764,6 +860,7 @@ class Runner:
         while time.monotonic() < end:
             if self.tg is not None:
                 self.tg.process()
+            self.process_web_commands()
             time.sleep(min(1.0, max(0.0, end - time.monotonic())))
 
     def run_forever(self) -> None:
@@ -774,6 +871,8 @@ class Runner:
         if getattr(self.cfg, "DASHBOARD_PORT", 0):
             from .dashboard import serve
             info = serve(self.folder, self.cfg.DASHBOARD_PORT, self.cfg.SNAPSHOT_FILE, lan=getattr(self.cfg, "DASHBOARD_PHONE", False),
+                         control=getattr(self.cfg, "DASHBOARD_CONTROL", "local"), submit=self.submit_web_command, results=self.web_results,
+                         symbols=lambda: sorted(self.symbols),
                          open_browser=getattr(self.cfg, "DASHBOARD_OPEN_BROWSER", True) and not os.environ.get("MT5BOT_NO_BROWSER"))
             log.info(f"Oberfläche: {info['local']}")
             for u in info["phone"]:

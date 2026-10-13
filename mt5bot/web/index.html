@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MT5-Bot</title>
+<meta name="csrf" content="__CSRF__">
+<meta name="control" content="__CONTROL__">
 <link rel="icon" href="data:,">
 <style>
   :root {
@@ -58,6 +60,18 @@
   .range { display: flex; gap: 6px; } .range button { padding: 4px 10px; font-size: 12px; } .range button.on { border-color: var(--cyan); color: var(--cyan); }
   #eqwrap { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 14px; } #eqwrap canvas { height: 190px; background: transparent; }
   .tablewrap { overflow-x: auto; } td.r, th.r { text-align: right; white-space: nowrap; }
+  .ctl { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); align-items: center; }
+  .ctl .label { color: var(--muted); letter-spacing: .08em; font-size: 11px; margin-right: 6px; }
+  button.buy { border-color: #238636; color: var(--green-t); } button.sell { border-color: var(--red); color: var(--red-t); }
+  button.danger { background: rgba(218,54,51,.18); border-color: var(--red); color: var(--red-t); } button.go { background: #238636; border-color: #238636; color: #fff; }
+  .sub { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; } .sub .sp { flex: 1; } .sub button { padding: 3px 10px; font-size: 12px; }
+  .modal { position: fixed; inset: 0; background: rgba(1,4,9,.72); display: flex; align-items: center; justify-content: center; z-index: 10; padding: 16px; }
+  .dlg { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; max-width: 420px; width: 100%; }
+  .dlg h3 { margin: 0 0 10px; font-size: 15px; } .dlg p { color: var(--muted); margin: 8px 0 14px; white-space: pre-line; }
+  .dlg label { display: block; color: var(--muted); font-size: 11px; letter-spacing: .06em; margin: 10px 0 4px; }
+  .dlg select { width: 100%; padding: 8px; background: var(--panel2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+  .dlg .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+  #toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--cyan); border-radius: 8px; padding: 10px 16px; z-index: 20; max-width: 90vw; }
   .badge.ext { border-color: #9e6a03; color: #d29922; background: rgba(187,128,9,.12); }
   .title { flex-wrap: wrap; gap: 6px 16px; } #profiles { word-break: break-all; } td { word-break: break-word; }
   @media (max-width: 600px) { header { gap: 14px; padding: 12px 16px; } main { padding: 14px 16px 30px; } .grid { grid-template-columns: 1fr; } .sep { display: none; } }
@@ -78,6 +92,8 @@
 <main>
   <div id="banner"></div>
   <div id="phone"></div>
+  <div id="ctl" class="ctl" hidden></div>
+  <div id="toast" hidden></div>
   <div class="title"><span>OFFENE POSITIONEN</span><span id="count"></span></div>
   <div class="grid" id="cards"></div>
   <div class="section">
@@ -149,6 +165,7 @@ function render() {
   if (acc && !acc.demo) banners.push("ACHTUNG: ECHTGELD-KONTO.");
   $("banner").replaceChildren(...banners.map((b) => h("div", "banner", b)));
 
+  renderControl();
   $("count").innerHTML = "";
   $("count").append(h("b", null, `${s.positions.length} aktiv`), ` · max ${s.max_positions}`);
   const cards = s.positions.map(card);
@@ -176,6 +193,7 @@ function card(p) {
   top.append(rb);
   const sub = h("div", "sub");
   sub.append(h("b", null, `${p.volume} Lots`), " · ", h("span", p.profit >= 0 ? "pos" : "neg", `${signed(p.profit)} ${snap.account ? snap.account.currency : ""}`), ` · ${p.profile} ${p.tf}`);
+  if (CONTROL && p.own !== false) { const sp = h("span", "sp"), cb = h("button", "danger", "✖ Schließen"); cb.onclick = () => askClose(p.ticket, `${p.symbol} ${p.direction === "short" ? "SHORT" : "LONG"} ${p.volume} Lots, aktuell ${signed(p.profit)}`); sub.append(sp, cb); }
   const foot = h("div", "foot");
   const cell = (k, v, cls) => { const d = h("div"); d.append(h("small", null, k), h("span", cls || "", v)); return d; };
   foot.append(
@@ -234,6 +252,56 @@ function draw(cv, p) {
   for (const v of ticks) { const y = Y(v); if (y > padT + 4 && y < H - padB - 2 && !used.some((u) => Math.abs(u - y) < 14)) g.fillText(px(v), W - padR + 6, y); }
 }
 
+// ---- Klick-Steuerung (nur sichtbar, wenn der Server sie für diesen Zugang erlaubt: DASHBOARD_CONTROL) ----
+const CSRF = document.querySelector('meta[name="csrf"]').content, CONTROL = document.querySelector('meta[name="control"]').content === "1" && CSRF.length > 10;
+function toast(text, ms = 6000) { const t = $("toast"); t.textContent = text; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => (t.hidden = true), ms); }
+function dialog(title, body, { ok = "Ausführen", cls = "go", fields = null } = {}) {
+  return new Promise((resolve) => {
+    const m = h("div", "modal"), d = h("div", "dlg"), vals = {};
+    d.append(h("h3", null, title), h("p", null, body));
+    (fields || []).forEach(([key, label, opts, def]) => { const sel = h("select"); opts.forEach((o) => { const op = h("option", null, o); op.value = o; sel.append(op); }); sel.value = def; vals[key] = sel; d.append(h("label", null, label), sel); });
+    const row = h("div", "row"), no = h("button", null, "Abbrechen"), yes = h("button", cls, ok);
+    const done = (v) => { m.remove(); resolve(v); };
+    no.onclick = () => done(null); yes.onclick = () => done(Object.fromEntries(Object.entries(vals).map(([k, e]) => [k, e.value])));
+    m.onclick = (e) => { if (e.target === m) done(null); };
+    row.append(no, yes); d.append(row); m.append(d); document.body.append(m);
+  });
+}
+async function send(cmd) {
+  try {
+    const r = await fetch("/api/command" + KEY, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF": CSRF }, body: JSON.stringify(cmd) });
+    const j = await r.json();
+    if (!r.ok) return toast(j.text || `Fehler ${r.status}`);
+    toast("Befehl gesendet …");
+    for (let i = 0; i < 20; i++) {
+      await new Promise((res) => setTimeout(res, 1000));
+      const q = await (await fetch("/api/result" + (KEY ? KEY + "&" : "?") + "id=" + j.id, { cache: "no-store" })).json();
+      if (q.done) { toast(q.text, 9000); load(); return; }
+    }
+    toast("Keine Antwort vom Bot – läuft er? (Ergebnis siehe Telegram/Log)");
+  } catch (e) { toast(`Fehler: ${e.message}`); }
+}
+async function openDialog(dir) {
+  const syms = (snap && snap.symbols) || [];
+  if (!syms.length) return toast("Keine Märkte verfügbar.");
+  const v = await dialog(dir === "buy" ? "🟢 Kaufen" : "🔴 Verkaufen", "Eröffnet sofort eine Position mit Stop-Loss (2×ATR) und Ziel (2R). Das Risiko ist der Anteil des Kontos, der bis zum Stop verloren gehen kann. Gilt Positions- und Tageslimit.",
+    { ok: dir === "buy" ? "Kaufen" : "Verkaufen", cls: dir === "buy" ? "go" : "danger", fields: [["symbol", "MARKT", syms, syms[0]], ["risk", "RISIKO (% DES KONTOS)", ["0.25", "0.5", "1", "2"], String((snap.manual && snap.manual.risk) || 0.5)]] });
+  if (v) send({ type: dir, symbol: v.symbol, risk: Number(v.risk) });
+}
+async function askClose(ticket, label) {
+  if (await dialog("Trade schließen?", `${label}\nWird sofort zum aktuellen Kurs geschlossen.`, { ok: "Schließen", cls: "danger" })) send({ type: "close", ticket });
+}
+function renderControl() {
+  const box = $("ctl");
+  if (!CONTROL || !snap) { box.hidden = true; return; }
+  box.hidden = false;
+  const b = (label, cls, fn) => { const e = h("button", cls, label); e.onclick = fn; return e; };
+  box.replaceChildren(h("span", "label", "STEUERUNG"),
+    b("🟢 Kaufen", "buy", () => openDialog("buy")), b("🔴 Verkaufen", "sell", () => openDialog("sell")),
+    snap.paused ? b("▶ Weiter", "go", () => send({ type: "resume" })) : b("⏸ Pause", "", () => send({ type: "pause" })),
+    b("❌ Alle schließen", "", async () => { if (await dialog("ALLE eigenen Trades schließen?", "Alle offenen Positionen dieses Bots werden sofort geschlossen.", { ok: "Alle schließen", cls: "danger" })) send({ type: "closeall" }); }),
+    b("🛑 Not-Aus", "danger", async () => { if (await dialog("NOT-AUS", "Alle eigenen Trades schließen UND neue Trades pausieren.", { ok: "Not-Aus", cls: "danger" })) send({ type: "kill" }); }));
+}
 let days = 0, hist = null;
 const RANGES = [[7, "7 Tage"], [30, "30 Tage"], [0, "Alles"]];
 function drawRange() {

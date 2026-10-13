@@ -15,11 +15,14 @@ from tests.test_mt5bot import FakeMT5, Pos, bars, cfg, run_signal, signal_series
 
 class FakeApi:
     def __init__(self):
-        self.sent = []
+        self.sent, self.markups, self.answered = [], [], []
 
     def call(self, method, params=None, timeout=0):
         if method == "sendMessage":
             self.sent.append(params["text"])
+            self.markups.append(params.get("reply_markup"))
+        elif method == "answerCallbackQuery":
+            self.answered.append(params["callback_query_id"])
         return {"ok": True, "result": []}
 
 
@@ -81,14 +84,14 @@ def test_close_needs_confirmation_and_is_recorded(tmp_path):
     tg, api = bridge(r)
     t = mt5.positions[0].ticket
     say(tg, f"/close {t}")
-    assert "Bestätigen mit /ja" in api.sent[-1] and len(mt5.positions) == 1
+    assert "Bestätigen?" in api.sent[-1] and len(mt5.positions) == 1
     say(tg, "/nein")
     assert len(mt5.positions) == 1
     say(tg, f"/close {t}")
     say(tg, "/ja")
     assert not mt5.positions and "geschlossen" in api.sent[-1]
     rows = history.read_trades(tmp_path)
-    assert len(rows) == 1 and rows[0]["close_reason"] == "Telegram /close" and rows[0]["profile"] == "video" and rows[0]["r"] is not None
+    assert len(rows) == 1 and rows[0]["close_reason"] == "Telegram: Schließen" and rows[0]["profile"] == "video" and rows[0]["r"] is not None
     assert "Frage 1" in rows[0]["open_reason"]
     say(tg, "/ja")
     assert "Nichts zu bestätigen" in api.sent[-1]
@@ -243,3 +246,145 @@ def test_autostart_install_remove(tmp_path, monkeypatch):
     assert f.parent == autostart.startup_dir() and "run_forever.bat" in text and "WScript.Shell" in text and ', 7, False' in text
     assert 'cmd /c ""' in text.replace('""', '""')
     assert autostart.remove() and not f.exists() and not autostart.remove()
+
+
+def buttons(api):
+    """Alle Knöpfe der letzten Nachricht als {Beschriftung: callback_data}."""
+    m = api.markups[-1] or {}
+    return {b["text"]: b["callback_data"] for row in m.get("inline_keyboard", []) for b in row}
+
+
+def tap(tg, data, chat="42"):
+    tg.ingest({"update_id": 2, "callback_query": {"id": "cb1", "data": data, "message": {"chat": {"id": int(chat)}}}})
+    tg.process()
+
+
+def test_menu_keyboard_and_button_labels_work_like_commands(tmp_path):
+    r, mt5 = run_signal(tmp_path)
+    tg, api = bridge(r)
+    say(tg, "/start")
+    kb = api.markups[-1]["keyboard"]
+    labels = [b["text"] for row in kb for b in row]
+    assert {"📊 Status", "📋 Trades", "🟢 Kaufen", "🔴 Verkaufen", "❌ Alle schließen", "🛑 Not-Aus"} <= set(labels)
+    say(tg, "📊 Status")
+    assert "Kapital" in api.sent[-1]
+    say(tg, "⏸ Pause")
+    assert r.state["paused"]
+    say(tg, "▶ Weiter")
+    assert not r.state["paused"]
+
+
+def test_trade_list_buttons_detail_and_close_by_click(tmp_path):
+    r, mt5 = run_signal(tmp_path)
+    tg, api = bridge(r)
+    say(tg, "📋 Trades")
+    b = buttons(api)
+    detail = next(v for k, v in b.items() if "Details" in k)
+    tap(tg, detail)
+    assert "WARUM GEKAUFT" in api.sent[-1] and "cb1" in api.answered
+    close = buttons(api)["✖ Trade schließen"]
+    tap(tg, close)
+    yes = buttons(api)["✅ Ja, ausführen"]
+    assert len(mt5.positions) == 1                      # erst nach Bestätigung
+    tap(tg, yes)
+    assert not mt5.positions and "geschlossen" in api.sent[-1]
+
+
+def test_buy_flow_by_clicks_symbol_risk_preview_confirm(tmp_path):
+    r, mt5 = run_signal(tmp_path)
+    mt5.positions.clear()
+    tg, api = bridge(r)
+    say(tg, "🟢 Kaufen")
+    sym = buttons(api)["XAUUSD"]
+    tap(tg, sym)
+    risks = buttons(api)
+    assert set(risks) == {"0.25 %", "0.5 %", "1 %", "2 %"}
+    tap(tg, risks["1 %"])
+    assert "Stop" in api.sent[-1] and "XAUUSD" in api.sent[-1] and not mt5.positions
+    tap(tg, buttons(api)["✅ Ja, ausführen"])
+    p = mt5.positions[0]
+    assert p.magic == 100900 and p.sl < p.price_open < p.tp
+    assert (p.price_open - p.sl) * p.volume * 100 <= 10_000 * 0.01 * 1.0001
+
+
+def test_stale_or_foreign_buttons_do_nothing(tmp_path):
+    r, mt5 = run_signal(tmp_path)
+    tg, api = bridge(r)
+    t = mt5.positions[0].ticket
+    say(tg, f"/close {t}")
+    old = buttons(api)["✅ Ja, ausführen"]
+    say(tg, f"/close {t}")                               # neue Frage: alte Knöpfe gelten nicht mehr
+    new = buttons(api)["✅ Ja, ausführen"]
+    tap(tg, old)
+    assert len(mt5.positions) == 1 and "nicht mehr gültig" in api.sent[-1]
+    n = len(api.sent)
+    tap(tg, new, chat="99")                              # Knopf aus fremdem Chat
+    assert len(api.sent) == n and len(mt5.positions) == 1
+    tap(tg, new)
+    assert not mt5.positions
+    tap(tg, new)                                         # zweimal tippen führt nichts doppelt aus
+    assert "nicht mehr gültig" in api.sent[-1]
+
+
+def test_web_control_requires_csrf_origin_and_mode(tmp_path):
+    import urllib.error
+    import urllib.request
+
+    from mt5bot.dashboard import serve
+    r, mt5 = run_signal(tmp_path)
+    info = serve(tmp_path, 0, open_browser=False, control="local", submit=r.submit_web_command, results=r.web_results, symbols=lambda: sorted(r.symbols))
+    port = info["server"].server_address[1]
+    base = f"http://127.0.0.1:{port}"
+    try:
+        html = urllib.request.urlopen(base + "/").read().decode()
+        assert 'content="1"' in html and "__CSRF__" not in html
+        token = html.split('name="csrf" content="')[1].split('"')[0]
+        assert len(token) > 20
+
+        def post(body, headers=None):
+            h = {"Content-Type": "application/json", "Host": f"127.0.0.1:{port}", **(headers or {})}
+            req = urllib.request.Request(base + "/api/command", data=json.dumps(body).encode(), headers=h, method="POST")
+            return urllib.request.urlopen(req)
+
+        for bad in ({}, {"X-CSRF": "falsch"}, {"X-CSRF": token, "Origin": "http://boese.example"}, {"X-CSRF": token, "Host": "boese.example"}):
+            with pytest.raises(urllib.error.HTTPError) as e:
+                post({"type": "closeall"}, bad)
+            assert e.value.code == 403
+        assert len(mt5.positions) == 1                    # nichts ausgeführt
+        with pytest.raises(urllib.error.HTTPError) as e:
+            post({"type": "buy", "symbol": "XAUUSD", "risk": 9}, {"X-CSRF": token})
+        assert e.value.code == 400
+        with pytest.raises(urllib.error.HTTPError) as e:
+            post({"type": "rm -rf"}, {"X-CSRF": token})
+        assert e.value.code == 400
+        cid = json.loads(post({"type": "close", "ticket": mt5.positions[0].ticket}, {"X-CSRF": token}).read())["id"]
+        r.process_web_commands()                          # Hauptschleife
+        res = json.loads(urllib.request.urlopen(f"{base}/api/result?id={cid}").read())
+        assert res["done"] and "geschlossen" in res["text"] and not mt5.positions
+        cid = json.loads(post({"type": "buy", "symbol": "XAUUSD", "risk": 0.5}, {"X-CSRF": token}).read())["id"]
+        r.process_web_commands()
+        assert mt5.positions and mt5.positions[0].magic == 100900
+        json.loads(post({"type": "pause"}, {"X-CSRF": token}).read())
+        r.process_web_commands()
+        assert r.state["paused"]
+    finally:
+        info["server"].shutdown()
+
+
+def test_web_control_off_and_phone_mode(tmp_path):
+    import urllib.error
+    import urllib.request
+
+    from mt5bot.dashboard import serve
+    r, mt5 = run_signal(tmp_path)
+    off = serve(tmp_path, 0, open_browser=False, control="off", submit=r.submit_web_command, results=r.web_results, symbols=lambda: [])
+    try:
+        port = off["server"].server_address[1]
+        html = urllib.request.urlopen(f"http://127.0.0.1:{port}/").read().decode()
+        assert 'name="control" content="0"' in html
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/command", data=b'{"type":"closeall"}', headers={"Content-Type": "application/json"}, method="POST")
+        with pytest.raises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(req)
+        assert e.value.code == 403 and len(mt5.positions) == 1
+    finally:
+        off["server"].shutdown()

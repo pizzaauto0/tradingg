@@ -58,7 +58,13 @@ def local_addresses() -> list[str]:
     return out
 
 
-def make_handler(folder: Path, snapshot_file: str, key: str | None, phone_urls: list[str]):
+COMMANDS = {"close", "closeall", "kill", "pause", "resume", "buy", "sell"}
+
+
+def make_handler(folder: Path, snapshot_file: str, key: str | None, phone_urls: list[str], ctl: dict | None = None):
+    ctl = ctl or {}
+    mode = ctl.get("mode", "off")  # "off" | "local" | "phone"
+    csrf = secrets.token_urlsafe(24)
     class Handler(BaseHTTPRequestHandler):
         def _send(self, code: int, body: bytes, ctype: str) -> None:
             self.send_response(code)
@@ -72,14 +78,37 @@ def make_handler(folder: Path, snapshot_file: str, key: str | None, phone_urls: 
         def _local(self) -> bool:
             return ipaddress.ip_address(self.client_address[0]).is_loopback
 
+        def _control_allowed(self) -> bool:
+            return bool(ctl.get("submit")) and (mode == "phone" or (mode == "local" and self._local()))
+
+        def _safe_origin(self) -> bool:
+            """Schutz vor fremden Webseiten (CSRF/DNS-Rebinding): Host muss einer unserer Adressen entsprechen, Origin (falls vorhanden) derselbe Host."""
+            host = self.headers.get("Host", "")
+            port = self.server.server_address[1]
+            ok = {f"127.0.0.1:{port}", f"localhost:{port}"} | {f"{ip}:{port}" for ip in local_addresses()}
+            origin = self.headers.get("Origin")
+            return host in ok and (origin is None or origin == f"http://{host}")
+
+        def _gate(self, url) -> bool:
+            if self._local():
+                return True
+            given = parse_qs(url.query).get("key", [""])[0]
+            if not key or not hmac.compare_digest(given, key):
+                self._send(403, "Zugriff verweigert: Link mit gültigem Schlüssel nötig.".encode(), "text/plain; charset=utf-8")
+                return False
+            return True
+
         def do_GET(self):  # noqa: N802 (Name von http.server vorgegeben)
             url = urlparse(self.path)
-            if not self._local():
-                given = parse_qs(url.query).get("key", [""])[0]
-                if not key or not hmac.compare_digest(given, key):
-                    return self._send(403, "Zugriff verweigert: Link mit gültigem Schlüssel nötig.".encode(), "text/plain; charset=utf-8")
+            if not self._gate(url):
+                return
             if url.path in ("/", "/index.html"):
-                return self._send(200, WEB.read_bytes(), "text/html; charset=utf-8")
+                page = WEB.read_text(encoding="utf-8").replace("__CSRF__", csrf if self._control_allowed() else "").replace("__CONTROL__", "1" if self._control_allowed() else "0")
+                return self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
+            if url.path == "/api/result":
+                rid = parse_qs(url.query).get("id", [""])[0]
+                res = (ctl.get("results") or {}).get(rid)
+                return self._send(200 if res else 404, json.dumps(res or {"done": True, "text": "unbekannte Anfrage"}).encode(), "application/json")
             if url.path == "/api/snapshot":
                 f = folder / snapshot_file
                 if not f.exists():
@@ -95,18 +124,51 @@ def make_handler(folder: Path, snapshot_file: str, key: str | None, phone_urls: 
                 return self._send(200, json.dumps({"urls": phone_urls}).encode(), "application/json")
             return self._send(404, b"nicht gefunden", "text/plain; charset=utf-8")
 
+        def do_POST(self):  # noqa: N802
+            url = urlparse(self.path)
+            if not self._gate(url):
+                return
+            if url.path != "/api/command":
+                return self._send(404, b"nicht gefunden", "text/plain; charset=utf-8")
+            if not self._control_allowed():
+                return self._send(403, b'{"text": "Steuerung ist hier abgeschaltet (DASHBOARD_CONTROL)."}', "application/json")
+            if not self._safe_origin() or not hmac.compare_digest(self.headers.get("X-CSRF", ""), csrf):
+                return self._send(403, b'{"text": "Anfrage abgelehnt (Herkunft/Token)."}', "application/json")
+            try:
+                n = int(self.headers.get("Content-Length", "0"))
+                if not 0 < n <= 2048:
+                    raise ValueError
+                cmd = json.loads(self.rfile.read(n))
+                t = cmd.get("type")
+                if t not in COMMANDS:
+                    raise ValueError
+                if t == "close":
+                    cmd = {"type": t, "ticket": int(cmd["ticket"])}
+                elif t in ("buy", "sell"):
+                    risk = float(cmd.get("risk", 0.5))
+                    sym = str(cmd.get("symbol", "")).upper()
+                    if sym not in (ctl["symbols"]() if callable(ctl.get("symbols")) else []) or not 0 < risk <= 2:
+                        raise ValueError
+                    cmd = {"type": t, "symbol": sym, "risk": risk}
+                else:
+                    cmd = {"type": t}
+            except (ValueError, KeyError, TypeError, json.JSONDecodeError):
+                return self._send(400, "{\"text\": \"Ungueltiger Befehl.\"}".encode(), "application/json")
+            return self._send(200, json.dumps({"id": ctl["submit"](cmd)}).encode(), "application/json")
+
         def log_message(self, *args):  # keine Zugriffszeilen im Bot-Log
             pass
 
     return Handler
 
 
-def serve(folder, port: int, snapshot_file: str = "mt5bot_snapshot.json", open_browser: bool = True, lan: bool = False) -> dict:
+def serve(folder, port: int, snapshot_file: str = "mt5bot_snapshot.json", open_browser: bool = True, lan: bool = False,
+          control: str = "off", submit=None, results=None, symbols=None) -> dict:
     folder = Path(folder)
     key = load_key(folder) if lan else None
     host = "0.0.0.0" if lan else "127.0.0.1"
     phone_urls: list[str] = []
-    server = ThreadingHTTPServer((host, port), make_handler(folder, snapshot_file, key, phone_urls))
+    server = ThreadingHTTPServer((host, port), make_handler(folder, snapshot_file, key, phone_urls, {"mode": control, "submit": submit, "results": results, "symbols": symbols}))
     real_port = server.server_address[1]
     if lan:
         phone_urls += [f"http://{ip}:{real_port}/?key={key}" for ip in local_addresses()]

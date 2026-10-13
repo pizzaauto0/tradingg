@@ -38,6 +38,8 @@ JOURNAL_FILE = "mt5bot_journal.csv"
 STATE_FILE = "mt5bot_state.json"
 SNAPSHOT_FILE = "mt5bot_snapshot.json"   # Datenstand für die Oberfläche
 DASHBOARD_PORT = 8765                     # Oberfläche unter http://127.0.0.1:8765 (0 = aus)
+DASHBOARD_CONTROL = "local"               # Klick-Steuerung im Portal: "local" = nur am PC selbst, "phone" = auch vom Handy (jeder mit dem Link kann dann
+                                          # Trades eröffnen/schließen!), "off" = Portal nur zum Ansehen
 DASHBOARD_PHONE = True                    # True: auch vom Handy im gleichen WLAN erreichbar – NUR mit geheimem Schlüssel im Link
                                           # (steht beim Start im Log und auf der Seite am PC). False: nur dieser PC.
 
