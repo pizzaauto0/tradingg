@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from tradingbot.analysis import atr, invert, regime_series
+from tradingbot.analysis import atr, invert, regime_series, rsi as rsi_lib
 from tradingbot.strategies import build_strategy
 
 
@@ -59,6 +59,38 @@ class LibraryStrategy:
         regime = regime_series(df).iloc[-1]
         return f"Marktphase {regime} | Signal: {sig or 'keins'}"
 
+    def explain(self, df, extra=None):
+        """Bedingungen der letzten geschlossenen Kerze als [(erfüllt, Text)] – das „Warum (nicht)“ für das Protokoll (Long-Seite)."""
+        if len(df) < self.min_bars:
+            return [(False, f"zu wenige Kerzen ({len(df)} von mindestens {self.min_bars})")]
+        reg = regime_series(df).iloc[-1]
+        ok = reg in self.strat.regimes
+        out = [(ok, f"Marktphase '{reg}' {'passt' if ok else 'passt NICHT'} zur Strategie (erlaubt: {', '.join(self.strat.regimes)})")]
+        t, p, c = self.strat.type_name, self.strat.params, df["close"]
+        if t == "ma_pullback":
+            ma = c.rolling(p["ma_period"]).mean()
+            now, old = ma.iloc[-1], ma.iloc[-1 - p["slope_bars"]]
+            thr = now * (1 + p["touch_pct"] / 100)
+            out += [(bool(now > old), f"Frage 1 – Trend über Wochen nach oben: Linie (SMA {p['ma_period']}) {now:.2f} vs. {old:.2f} vor {p['slope_bars']} Kerzen"),
+                    (bool(df['low'].iloc[-1] <= thr), f"Frage 2 – Rücksetzer bis zur Linie: Tief {df['low'].iloc[-1]:.2f} {'≤' if df['low'].iloc[-1] <= thr else '>'} {thr:.2f} (Linie + {p['touch_pct']} %)"),
+                    (bool(c.iloc[-1] > now), f"Schluss {c.iloc[-1]:.2f} {'über' if c.iloc[-1] > now else 'unter'} der Linie {now:.2f}"),
+                    (bool(c.iloc[-1] > df['open'].iloc[-1]), f"Kerze {'bullisch (grün)' if c.iloc[-1] > df['open'].iloc[-1] else 'nicht bullisch'}")]
+        elif t == "connors_rsi2":
+            ma = c.rolling(p["trend"]).mean().iloc[-1]
+            r = rsi_lib(c, p["rsi_period"]).iloc[-1]
+            out += [(bool(c.iloc[-1] > ma), f"Trendfilter: Schluss {c.iloc[-1]:.2f} {'über' if c.iloc[-1] > ma else 'unter'} SMA {p['trend']} ({ma:.2f})"),
+                    (bool(r < p["oversold"]), f"RSI({p['rsi_period']}) = {r:.1f}, nötig unter {p['oversold']:g} (sehr überverkauft)")]
+        elif t == "ibs_reversion":
+            rng = df["high"].iloc[-1] - df["low"].iloc[-1]
+            ibs = (c.iloc[-1] - df["low"].iloc[-1]) / rng if rng > 0 else float("nan")
+            out.append((bool(ibs < p["low"]), f"IBS (Schluss in der Kerzenspanne) = {ibs:.2f}, nötig unter {p['low']:g}"))
+        elif t == "breakout":
+            hi = df["high"].rolling(p["lookback"]).max().shift(1).iloc[-1]
+            out.append((bool(c.iloc[-1] > hi), f"Schluss {c.iloc[-1]:.2f} {'über' if c.iloc[-1] > hi else 'nicht über'} dem Hoch der letzten {p['lookback']} Kerzen ({hi:.2f})"))
+        else:
+            out.append((bool(self.strat.entry(df).iloc[-1]), f"Einstiegsregel {self.strat.name}: {'erfüllt' if self.strat.entry(df).iloc[-1] else 'nicht erfüllt'}"))
+        return out
+
 
 class RsiPullback:
     """Strategie der Beispiel-Bots 1 und 2: Kurs über der Trend-EMA (bzw. darunter für Short, mit Neutralzone um die EMA),
@@ -105,6 +137,16 @@ class RsiPullback:
     def exit(self, df, direction, extra=None):
         return False  # Ausstieg nur über Stop-Loss / Take-Profit (wie bei den Beispiel-Bots)
 
+    def explain(self, df, extra=None):
+        if len(df) < self.min_bars:
+            return [(False, f"zu wenige Kerzen ({len(df)} von mindestens {self.min_bars})")]
+        c, ema, rsi, a = self._calc(df)
+        buf = a.iloc[-1] * self.buffer
+        up = bool(c.iloc[-1] > ema.iloc[-1] + buf)
+        cross = bool(rsi.iloc[-2] <= self.oversold < rsi.iloc[-1])
+        return [(up, f"Trend: Schluss {c.iloc[-1]:.2f} {'über' if up else 'nicht über'} EMA {self.trend_len} ({ema.iloc[-1]:.2f}){f' + Puffer {buf:.2f}' if buf else ''}"),
+                (cross, f"RSI({self.rsi_len}) {rsi.iloc[-2]:.1f} → {rsi.iloc[-1]:.1f}: Kreuz von unten über {self.oversold:g} {'JA' if cross else 'nein'}")]
+
     def status(self, df, extra=None):
         if len(df) < self.min_bars:
             return "warte auf genug Kerzen"
@@ -150,6 +192,19 @@ class GoldSilverDivergence:
 
     def exit(self, df, direction, extra=None):
         return False
+
+    def explain(self, df, extra=None):
+        ref = (extra or {}).get(self.ref)
+        if ref is None or len(df) < self.min_bars or len(ref) < self.min_bars:
+            return [(False, f"zu wenige Kerzen für Gold und {self.ref} (nötig {self.min_bars})")]
+        d, band = self._diff_band(df, ref)
+        if d is None or d.iloc[-2:].isna().any() or band.iloc[-2:].isna().any():
+            return [(False, "Differenz/Band noch nicht berechenbar")]
+        was_below, now_below = bool(d.iloc[-2] <= band.iloc[-2]), bool(d.iloc[-1] <= band.iloc[-1])
+        up = bool(df["close"].iloc[-1] > df["close"].ewm(span=self.trend_len, adjust=False).mean().iloc[-1])
+        return [(was_below, f"Vorkerze: Gold hing gegenüber Silber zurück (Differenz {d.iloc[-2]:+.4f} {'≤' if was_below else '>'} Band {band.iloc[-2]:+.4f})"),
+                (not now_below, f"Jetzt wieder über dem Band (Differenz {d.iloc[-1]:+.4f}, Band {band.iloc[-1]:+.4f}) = Aufholbewegung {'JA' if not now_below else 'nein'}"),
+                (up, f"Trendfilter: Gold {'über' if up else 'unter'} EMA {self.trend_len}")]
 
     def status(self, df, extra=None):
         ref = (extra or {}).get(self.ref)

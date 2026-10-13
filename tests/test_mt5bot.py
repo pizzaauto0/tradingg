@@ -285,3 +285,59 @@ def test_phone_access_requires_key(tmp_path):
         assert opener.open(base + f"api/snapshot?key={key}").status == 200
     finally:
         info["server"].shutdown()
+
+
+def test_decision_log_and_hourly_report_explain_why(tmp_path):
+    r, mt5 = run_signal(tmp_path)
+    day = [f for f in (tmp_path / "logs").glob("entscheidungen_*.log")]
+    assert day, "Entscheidungsprotokoll angelegt"
+    text = day[0].read_text(encoding="utf-8")
+    assert "KAUF" in text and "Frage 1" in text and "Frage 2" in text and "✔" in text
+    # Begründung bleibt beim offenen Trade gespeichert (auch nach Neustart)
+    reason = next(iter(r.state["trades"].values()))["reason"]
+    assert "LONG XAUUSD" in reason and "Linie" in reason and "Risiko" in reason
+
+    assert r.maybe_report(force=True)
+    rep = next((tmp_path / "logs").glob("bericht_*.txt")).read_text(encoding="utf-8")
+    for part in ("1. KONTO", "2. OFFENE POSITIONEN", "WARUM GEKAUFT", "3. EREIGNISSE", "4. MARKTANALYSE", "Frage 1"):
+        assert part in rep, part
+    assert r.events == [] and r.state["last_report"]
+    assert not r.maybe_report()                  # erst nach REPORT_MINUTES wieder fällig
+    r.state["last_report"] = "2000-01-01T00:00:00+00:00"
+    assert r.maybe_report()
+
+
+def test_no_signal_is_logged_with_missing_conditions(tmp_path):
+    series = list(np.linspace(100, 160, 330))     # glatter Anstieg ohne Rücksetzer: kein Einstieg
+    mt5 = FakeMT5({"XAUUSD": bars(series)})
+    r = Runner(mt5, cfg(), tmp_path)
+    r.connect()
+    mt5.n = 320
+    r.step()
+    mt5.n = 321
+    r.step()
+    assert not mt5.positions
+    text = next((tmp_path / "logs").glob("entscheidungen_*.log")).read_text(encoding="utf-8")
+    assert "KEIN KAUF" in text and "✘" in text and "Rücksetzer bis zur Linie" in text
+    ev = [e for e in r.events if e["kind"] == "KEIN KAUF"]
+    assert ev and any(not ok for ok, _ in ev[-1]["checks"])
+
+
+def test_blocked_signal_by_position_limit_is_explained(tmp_path):
+    r, mt5 = run_signal(tmp_path, c=cfg(MAX_OPEN_POSITIONS=0))
+    assert not mt5.positions
+    assert any(e["kind"] == "BLOCKIERT" and "Positionslimit" in e["text"] for e in r.events)
+
+
+def test_broker_side_close_is_recorded_with_reason(tmp_path):
+    r, mt5 = run_signal(tmp_path)
+    ticket = mt5.positions[0].ticket
+    Deal = namedtuple("Deal", "entry profit commission swap price reason")
+    mt5.DEAL_REASON_SL, mt5.DEAL_REASON_TP = 3, 4
+    mt5.history_select = lambda a, b: True
+    mt5.history_deals_get = lambda position=None: [Deal(1, -97.0, -1.0, 0.0, 153.79, 3)]
+    mt5.positions.clear()                        # Broker hat die Position über den Stop geschlossen
+    r.track_positions()
+    ev = [e for e in r.events if e["kind"] == "VERKAUF"]
+    assert ev and "Stop-Loss getroffen" in ev[-1]["text"] and "-98.00" in ev[-1]["text"] and "ursprüngliche Begründung" in ev[-1]["text"]
+    assert str(ticket) not in r.state["trades"]

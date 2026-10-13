@@ -16,7 +16,7 @@ import math
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -41,6 +41,9 @@ class Runner:
     def __init__(self, mt5, cfg=default_config, folder: str | Path = "."):
         self.mt5, self.cfg, self.folder = mt5, cfg, Path(folder)
         self.profiles = []
+        self.events: list[dict] = []          # Ereignisse seit dem letzten Stundenbericht
+        self.started = datetime.now().astimezone()
+        self.errors_since_report: list[str] = []
         self.symbols: dict[str, str] = {}      # Konfig-Name -> Broker-Name
         self.last_bar: dict[tuple, object] = {}
         self.halted_day: str | None = None
@@ -59,6 +62,114 @@ class Runner:
         magics = [p["magic"] for p in self.profiles]
         if len(set(magics)) != len(magics):
             raise ValueError("Jedes Profil braucht eine eigene Magic Number")
+
+    # ---------- Protokoll: Entscheidungen und Berichte ----------
+    def _logdir(self) -> Path:
+        d = self._path(getattr(self.cfg, "LOG_DIR", "logs"))
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    @staticmethod
+    def fmt_checks(checks) -> str:
+        return "\n".join(f"      {'✔' if ok else '✘'} {text}" for ok, text in (checks or []))
+
+    def event(self, kind: str, head: str, text: str = "", checks=None) -> None:
+        """Hält eine Entscheidung fest: sofort in entscheidungen_<Datum>.log, außerdem für den nächsten Stundenbericht."""
+        now = datetime.now().astimezone()
+        self.events.append({"t": now.isoformat(), "kind": kind, "head": head, "text": text, "checks": list(checks or [])})
+        line = f"{now:%Y-%m-%d %H:%M:%S} | {kind:<10} | {head}" + (f" | {text}" if text else "")
+        extra = self.fmt_checks(checks)
+        try:
+            with open(self._logdir() / f"entscheidungen_{now:%Y-%m-%d}.log", "a", encoding="utf-8") as fh:
+                fh.write(line + "\n" + (extra + "\n" if extra else ""))
+        except OSError:
+            log.exception("Entscheidungsprotokoll konnte nicht geschrieben werden")
+
+    def build_report(self, now: datetime) -> str:
+        mt5, L = self.mt5, []
+        acc = mt5.account_info()
+        sep = "=" * 78
+        L += [sep, f"BERICHT {now:%Y-%m-%d %H:%M} (Ortszeit)   |   Bot läuft seit {self.started:%Y-%m-%d %H:%M}", sep, ""]
+        L.append("1. KONTO UND ZUSTAND")
+        if acc:
+            start = self.state.get("start_equity")
+            pnl = f"{acc.equity - start:+.2f} ({(acc.equity - start) / start * 100:+.2f} %)" if start else "–"
+            L.append(f"   Konto {acc.login} ({acc.server}), {'DEMO' if acc.trade_mode == mt5.ACCOUNT_TRADE_MODE_DEMO else 'ECHTGELD'}")
+            L.append(f"   Kapital {acc.equity:.2f} {acc.currency}  |  Tagesbeginn {start if start is not None else '–'}  |  Tages-P&L {pnl}")
+        else:
+            L.append("   Kein Konto abrufbar (Verbindung weg?)")
+        L.append(f"   Tageslimit: {'ERREICHT – keine neuen Trades' if self.halted_day else 'frei'} (Grenze {self.cfg.DAILY_LOSS_LIMIT_PCT} %)  |  "
+                 f"Kill-Switch: {'AKTIV' if self.kill_requested() else 'aus'}  |  Max. Positionen {self.cfg.MAX_OPEN_POSITIONS}")
+        for prof in self.profiles:
+            L.append(f"   Profil '{prof['name']}': {prof['strat'].name}  | Märkte: " + ", ".join(f"{n} {t}" for n, t in prof["markets"].items())
+                     + f"  | Risiko {prof.get('risk_percent', 1.0)} %, Stop {prof.get('atr_stop_mult', 2.0)}×ATR, Ziel {prof.get('rr', 2.0)}R")
+        if self.errors_since_report:
+            L.append(f"   Fehler seit dem letzten Bericht: {len(self.errors_since_report)}, zuletzt: {self.errors_since_report[-1]}")
+        L.append("")
+        L.append("2. OFFENE POSITIONEN (mit Begründung)")
+        poss = self.all_positions()
+        if not poss:
+            L.append("   keine")
+        for pos in poss:
+            label, own = self.bot_name(pos.magic)
+            rec = self.state.get("trades", {}).get(str(pos.ticket), {})
+            r_now, r_max = self.r_values(pos)
+            L.append(f"   #{pos.ticket} {pos.symbol} {'LONG' if pos.type == mt5.POSITION_TYPE_BUY else 'SHORT'} {pos.volume} Lots  [{label}{'' if own else ' – nicht von diesem Bot verwaltet'}]")
+            L.append(f"      Einstieg {rec.get('entry', pos.price_open)}  Stop {pos.sl}  Ziel {pos.tp}  Kurs {self._price(pos)}  Gewinn {getattr(pos, 'profit', 0.0):+.2f}"
+                     + (f"  R {r_now:+.2f} (max {r_max:+.2f})" if r_now is not None else ""))
+            if rec.get("reason"):
+                L.append("      WARUM GEKAUFT: " + rec["reason"].replace("\n", "\n      "))
+        L.append("")
+        L.append("3. EREIGNISSE SEIT DEM LETZTEN BERICHT")
+        if not self.events:
+            L.append("   keine neue Kerze ausgewertet, keine Order")
+        trades = [e for e in self.events if e["kind"] in ("KAUF", "VERKAUF", "SCHLIESSEN", "FEHLER", "LIMIT", "BLOCKIERT")]
+        for e in self.events:
+            t = datetime.fromisoformat(e["t"])
+            L.append(f"   {t:%H:%M:%S} {e['kind']:<10} {e['head']}" + (f" – {e['text']}" if e["text"] else ""))
+            if e["checks"] and e["kind"] in ("KAUF", "KEIN KAUF", "BLOCKIERT"):
+                L.append(self.fmt_checks(e["checks"]).replace("      ", "         "))
+        L.append(f"   Summe: {sum(e['kind'] == 'KAUF' for e in self.events)} Kauf/Käufe, {sum(e['kind'] in ('VERKAUF', 'SCHLIESSEN') for e in self.events)} Schließung(en), "
+                 f"{sum(e['kind'] == 'KEIN KAUF' for e in self.events)} Auswertung(en) ohne Kauf, {len(trades) - sum(e['kind'] in ('KAUF', 'VERKAUF', 'SCHLIESSEN') for e in trades)} Hinweis(e)/Fehler")
+        L.append("")
+        L.append("4. MARKTANALYSE JETZT (Warum würde er kaufen / warum nicht)")
+        for prof in self.profiles:
+            for name, tf in prof["markets"].items():
+                df = self.closed_bars(name, tf)
+                head = f"   [{prof['name']}] {name} {tf}"
+                if df is None:
+                    L.append(f"{head}: keine Daten (Markt geschlossen oder Symbol fehlt)")
+                    continue
+                try:
+                    extra = {r: self.closed_bars(r, tf) for r in prof["strat"].needs}
+                    checks = prof["strat"].explain(df, extra)
+                    sig = prof["strat"].entry(df, extra)
+                    missing = [t for ok, t in checks if not ok]
+                    L.append(f"{head}  (letzte geschlossene Kerze {df.index[-1]:%Y-%m-%d %H:%M})")
+                    L.append(f"      Ergebnis: {'KAUFSIGNAL – ' + sig.upper() if sig else 'kein Signal'}"
+                             + (f"  |  es fehlt: {len(missing)} Bedingung(en)" if missing and not sig else ""))
+                    L.append(self.fmt_checks(checks))
+                except Exception as e:  # Bericht darf nie am Detail scheitern
+                    L.append(f"{head}: Analyse nicht möglich ({e})")
+        nxt = self._next_bar_time()
+        L += ["", f"Nächste Kerze/Entscheidung: {nxt or 'noch unbekannt'}", ""]
+        return "\n".join(L)
+
+    def maybe_report(self, force: bool = False) -> bool:
+        now = datetime.now().astimezone()
+        last = self.state.get("last_report")
+        due = force or not last or (now - datetime.fromisoformat(last)).total_seconds() >= getattr(self.cfg, "REPORT_MINUTES", 60) * 60
+        if not due:
+            return False
+        text = self.build_report(now)
+        with open(self._logdir() / f"bericht_{now:%Y-%m-%d}.txt", "a", encoding="utf-8") as fh:
+            fh.write(text + "\n")
+        self.state["last_report"] = now.isoformat()
+        self._save_state()
+        self.events.clear()
+        self.errors_since_report.clear()
+        log.info(f"Bericht geschrieben: {self._logdir() / ('bericht_' + now.strftime('%Y-%m-%d') + '.txt')}")
+        return True
 
     # ---------- Zustand ----------
     def _path(self, name: str) -> Path:
@@ -228,6 +339,15 @@ class Runner:
                       "richtung": direction, "lots": lots, "preis": res.price, "sl": sl, "tp": tp, "risiko": f"{risk:.2f}",
                       "grund": why, "equity": f"{acc.equity:.2f}" if acc else ""})
         self.enforce_protection(prof, sym, sl, tp)
+        self.track_positions()
+        mine = [x for x in self.positions(prof["magic"]) if x.symbol == sym]
+        if mine:  # Begründung bleibt auch nach einem Neustart erhalten (Bericht: „Warum gekauft“)
+            newest = max(mine, key=lambda x: x.ticket)
+            tf = prof["markets"].get(self._market_of(prof, newest) or "", "")
+            self.state.setdefault("trades", {}).setdefault(str(newest.ticket), {})["reason"] = (
+                f"{direction.upper()} {sym} {tf} ({prof['name']}): {why}\n"
+                f"Risiko {risk:.2f} (= {prof.get('risk_percent', 1.0)} % des Kontos), Stop {sl} ({prof.get('atr_stop_mult', 2.0)}xATR), Ziel {tp} ({prof.get('rr', 2.0)}R)")
+            self._save_state()
         return True
 
     def enforce_protection(self, prof: dict, sym: str, sl: float, tp: float) -> None:
@@ -252,6 +372,7 @@ class Runner:
         res = self._send(req)
         ok = bool(res and res.retcode == mt5.TRADE_RETCODE_DONE)
         log.info(f"{'GESCHLOSSEN' if ok else 'SCHLIESSEN FEHLGESCHLAGEN'}: {pos.symbol} #{pos.ticket} – {why}")
+        self.event("VERKAUF" if ok else "FEHLER", f"{pos.symbol} #{pos.ticket}", f"{why}; Gewinn zuletzt {getattr(pos, 'profit', 0.0):+.2f}")
         if ok:
             self.journal({"zeit": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "ereignis": "CLOSE", "symbol": pos.symbol, "grund": why,
                           "gewinn": f"{pos.profit:.2f}", "lots": pos.volume})
@@ -272,6 +393,7 @@ class Runner:
         if start > 0 and (start - acc.equity) / start * 100 >= self.cfg.DAILY_LOSS_LIMIT_PCT:
             if self.halted_day != day:
                 log.warning(f"TAGESVERLUST-LIMIT erreicht ({(start - acc.equity) / start * 100:.2f} %) – keine neuen Trades bis morgen.")
+                self.event("LIMIT", "Tagesverlust-Limit", f"{(start - acc.equity) / start * 100:.2f} % Verlust seit Tagesbeginn (Grenze {self.cfg.DAILY_LOSS_LIMIT_PCT} %) – keine neuen Trades bis zum nächsten UTC-Tag")
                 self.halted_day = day
             return False
         return True
@@ -300,6 +422,7 @@ class Runner:
         rec = self.state.setdefault("trades", {})
         live = {str(p.ticket): p for p in self.all_positions()}
         for t in [t for t in rec if t not in live]:
+            self._note_closed_by_broker(t, rec[t])
             del rec[t]
         for t, pos in live.items():
             price = self._price(pos)
@@ -313,6 +436,30 @@ class Runner:
             buy = pos.type == self.mt5.POSITION_TYPE_BUY
             r["best"] = max(r["best"], price) if buy else min(r["best"], price)
         self._save_state()
+
+    def _note_closed_by_broker(self, ticket: str, r: dict) -> None:
+        """Position ist weg, ohne dass der Bot sie geschlossen hat (Stop-Loss/Take-Profit beim Broker, manuell): Grund und Ergebnis festhalten."""
+        mt5 = self.mt5
+        reason, profit, price = "geschlossen (Stop-Loss, Take-Profit oder manuell)", None, None
+        try:
+            if hasattr(mt5, "history_select"):
+                now = datetime.now(timezone.utc)
+                mt5.history_select(now - timedelta(days=30), now + timedelta(days=1))
+            deals = mt5.history_deals_get(position=int(ticket)) if hasattr(mt5, "history_deals_get") else None
+            outs = [d for d in (deals or []) if getattr(d, "entry", 0) == 1]
+            if outs:
+                profit = sum(d.profit + getattr(d, "commission", 0) + getattr(d, "swap", 0) for d in outs)
+                price = outs[-1].price
+                why = {getattr(mt5, "DEAL_REASON_SL", 3): "Stop-Loss getroffen", getattr(mt5, "DEAL_REASON_TP", 4): "Take-Profit erreicht"}
+                reason = why.get(getattr(outs[-1], "reason", -1), reason)
+        except Exception:
+            log.exception("Abschlussdaten nicht abrufbar")
+        risk = abs(r.get("entry", 0) - r.get("sl0", 0)) if r.get("sl0") else None
+        text = f"{reason}" + (f" @ {price}" if price is not None else "") + (f", Ergebnis {profit:+.2f}" if profit is not None else "")
+        self.event("VERKAUF", f"Ticket {ticket}", text + (f" | ursprüngliche Begründung: {r['reason'].splitlines()[0]}" if r.get("reason") else ""))
+        if profit is not None:
+            self.journal({"zeit": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "ereignis": "CLOSE", "symbol": "", "grund": reason, "gewinn": f"{profit:.2f}", "preis": price})
+        del risk
 
     def r_values(self, pos) -> tuple[float | None, float | None]:
         r = self.state.get("trades", {}).get(str(pos.ticket))
@@ -421,7 +568,11 @@ class Runner:
             for pos in self.positions():
                 self.close(pos, "Kill-Switch")
             log.warning("KILL-SWITCH aktiv: keine neuen Trades. Datei löschen, um weiterzumachen.")
+            if not getattr(self, "_kill_logged", False):
+                self.event("LIMIT", "Kill-Switch", "Datei KILL_SWITCH gefunden: alle eigenen Positionen geschlossen, keine neuen Trades")
+                self._kill_logged = True
             return
+        self._kill_logged = False
         allowed = self.day_check()
         self.track_positions()
         self.manage_open()
@@ -440,21 +591,34 @@ class Runner:
                 if first:
                     continue  # beim Start keine Alt-Signale nachhandeln
                 extra = {r: self.closed_bars(r, tf) for r in strat.needs}
+                head = f"{prof['name']} | {name} {tf} | Kerze {newest:%Y-%m-%d %H:%M}"
+                checks = strat.explain(df, extra)
                 mine = self.positions(prof["magic"], name)
                 for pos in mine:  # Ausstiegssignal der Strategie
                     direction = "long" if pos.type == self.mt5.POSITION_TYPE_BUY else "short"
                     if strat.exit(df, direction, extra):
                         self.close(pos, f"Ausstiegssignal {strat.name}")
-                if self.positions(prof["magic"], name) or not allowed:
+                if self.positions(prof["magic"], name):
+                    self.event("KEIN KAUF", head, "Position bereits offen – höchstens eine je Markt und Profil", checks)
                     continue
                 direction = strat.entry(df, extra)
                 if direction is None:
+                    open_missing = [t for ok, t in checks if not ok]
+                    self.event("KEIN KAUF", head, f"{len(open_missing)} Bedingung(en) nicht erfüllt" if open_missing else "keine Einstiegsregel erfüllt", checks)
                     continue
                 log.info(f"SIGNAL: {direction.upper()} {name} ({tf}) {prof['name']} @ Kerze {newest}")
+                if not allowed:
+                    self.event("BLOCKIERT", head, f"Signal {direction.upper()}, aber Tagesverlust-Limit erreicht – kein Trade", checks)
+                    continue
                 if len(self.positions()) >= self.cfg.MAX_OPEN_POSITIONS:
                     log.info(f"{name}: Max. offene Positionen ({self.cfg.MAX_OPEN_POSITIONS}) erreicht – übersprungen.")
+                    self.event("BLOCKIERT", head, f"Signal {direction.upper()}, aber Positionslimit ({self.cfg.MAX_OPEN_POSITIONS}) erreicht", checks)
                     continue
-                self.place(prof, name, direction, f"{strat.name}: {strat.status(df, extra)}")
+                why = f"{strat.name}: " + "; ".join(t for _, t in checks)
+                if self.place(prof, name, direction, why):
+                    self.event("KAUF", head, f"{direction.upper()} eröffnet", checks)
+                else:
+                    self.event("FEHLER", head, f"Signal {direction.upper()}, aber Order nicht ausgeführt (Details im Log: Lot-Größe, Ablehnung, Spread)", checks)
 
     def heartbeat(self) -> None:
         acc = self.mt5.account_info()
@@ -481,6 +645,10 @@ class Runner:
             for u in info["phone"]:
                 log.info(f"Auf dem Handy (gleiches WLAN oder Tailscale): {u}   <- Link geheim halten, er enthält den Zugangsschlüssel")
         self.heartbeat()
+        try:
+            self.maybe_report(force=True)  # Startbericht: Zustand und Marktanalyse sofort
+        except Exception:
+            log.exception("Startbericht konnte nicht geschrieben werden")
         last_hb = time.monotonic()
         try:
             while True:
@@ -490,10 +658,16 @@ class Runner:
                 except Exception as e:  # ein Fehler (z. B. kurz keine Verbindung) beendet den Bot nicht
                     error = f"{type(e).__name__}: {e}"
                     log.exception("Fehler im Durchlauf – nächster Versuch in Kürze")
+                    self.errors_since_report.append(error)
+                    self.event("FEHLER", "Durchlauf", error)
                 try:
                     self.write_snapshot(error)
                 except Exception:
                     log.exception("Datenstand für die Oberfläche konnte nicht geschrieben werden")
+                try:
+                    self.maybe_report()
+                except Exception:
+                    log.exception("Bericht konnte nicht geschrieben werden")
                 if time.monotonic() - last_hb >= self.cfg.HEARTBEAT_MINUTES * 60:
                     self.heartbeat()
                     last_hb = time.monotonic()

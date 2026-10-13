@@ -46,6 +46,13 @@ Jedes Profil braucht eine **eigene Magic Number**; so verwalten mehrere Profile 
 - Entscheidung nur bei neu geschlossenen Kerzen; beim Start keine Alt-Signale.
 - Journal `mt5bot_journal.csv`, Log `mt5bot.log`, Lebenszeichen mit Marktzustand alle 15 Minuten.
 
+## Protokolle: warum gekauft, warum nicht
+Im Ordner `logs/` (im Projektordner) schreibt der Bot von selbst:
+- **`entscheidungen_<Datum>.log`** – jede ausgewertete Kerze: Kauf, **kein Kauf mit den nicht erfüllten Bedingungen** (✔/✘ je Bedingung mit den echten Zahlen), blockierte Signale (Positionslimit, Tageslimit), Order-Fehler, Verkäufe (Ausstiegssignal, Stop-Loss, Take-Profit, Kill-Switch) und Tageslimit-Ereignisse.
+- **`bericht_<Datum>.txt`** – **alle 60 Minuten** (und beim Start) ein ausführlicher Bericht: 1. Konto und Zustand, 2. offene Positionen mit **„WARUM GEKAUFT“** (die Begründung bleibt auch nach einem Neustart erhalten), 3. Ereignisse seit dem letzten Bericht, 4. Marktanalyse jetzt (warum würde er kaufen / warum nicht), nächste Kerze.
+Zusätzlich wie bisher `mt5bot_journal.csv` (Trades) und `mt5bot.log`. Intervall: `REPORT_MINUTES`, Ordner: `LOG_DIR` in der Konfiguration.
+Die Dateien sind reiner Text (UTF-8) – im Editor öffnen oder hier einfügen, wenn du mit mir die Ergebnisse auswerten willst.
+
 ## Symbolnamen
 Manche Broker nennen Gold `GOLD` statt `XAUUSD`: `SYMBOL_ALIASES` in der Konfiguration wird der Reihe nach probiert; was nicht gefunden wird, wird übersprungen.
 
