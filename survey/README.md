@@ -31,3 +31,13 @@ python survey/survey.py --interval 1d --cost-mult 2        (Kostenstress: doppel
 python -m survey.pruefen --runs 1d 1d_2y --stress 1d_x2
 ```
 Ergebnis: `survey/out/pruefung.txt` mit ✔/✘ je Regel und dem Urteil ÜBERNEHMEN / BEOBACHTEN / ABLEHNEN.
+
+## Tiefensuche (ca. 20 Minuten gezielt suchen)
+```
+python -m survey.tiefensuche --interval 1d --minutes 20
+```
+Testet über die Suchzeit Tausende zufällige Parameter-Kombinationen aller Strategie-Typen auf allen Märkten. Gesucht wird nur auf dem **Trainingsteil** (erste 60 %),
+die Besten werden danach auf dem **unbekannten Testteil** geprüft, mit **doppelten Kosten** und mit **leicht veränderten Parametern** (Nachbarn).
+Ergebnis: `survey/out/tiefensuche_1d/ergebnisse.txt` (mit Ehrlichkeits-Check: wie viel vom Trainings-Spitzenwert im Test übrig bleibt), `kandidaten.json`, `alle_konfigurationen.csv`.
+Mehr Suchzeit: `--minutes 40`. Zwischenstand und Abbruch: Strg+C wertet das bisher Gefundene aus. Andere Zeitrahmen: `--interval 4h` (Daten: 2 Jahre).
+Gefundene Kandidaten danach wie jede neue Strategie durch `STRATEGIE_CHECKLISTE.md` schicken (zweiter Zeitraum, `survey.pruefen`, Demo-Abnahme).
