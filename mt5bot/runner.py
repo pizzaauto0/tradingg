@@ -209,7 +209,7 @@ class Runner:
                  f"Kill-Switch: {'AKTIV' if self.kill_requested() else 'aus'}  |  Max. Positionen {self.cfg.MAX_OPEN_POSITIONS}")
         for prof in self.profiles:
             L.append(f"   Profil '{prof['name']}': {prof['strat'].name}  | Märkte: " + ", ".join(f"{n} {t}" for n, t in prof["markets"].items())
-                     + f"  | Risiko {prof.get('risk_percent', 1.0)} %, Stop {prof.get('atr_stop_mult', 2.0)}×ATR, Ziel {prof.get('rr', 2.0)}R")
+                     + "  | Risiko {} %, Stop {:g}×ATR, Ziel {:g}R".format(prof.get("risk_percent", 1.0), *self.exit_params(prof)))
         if self.errors_since_report:
             L.append(f"   Fehler seit dem letzten Bericht: {len(self.errors_since_report)}, zuletzt: {self.errors_since_report[-1]}")
         L.append("")
@@ -327,7 +327,9 @@ class Runner:
         wanted = {s for p in self.profiles for s in p["markets"]} | {r for p in self.profiles for r in p["strat"].needs}
         wanted |= set((getattr(self.cfg, "MANUAL", None) or {}).get("symbols", []))
         for name in sorted(wanted):
-            for cand in [name] + [a for a in self.cfg.SYMBOL_ALIASES.get(name, []) if a != name]:
+            base = [name] + [a for a in self.cfg.SYMBOL_ALIASES.get(name, []) if a != name]
+            sfx = getattr(self.cfg, "SYMBOL_SUFFIXES", [""])
+            for cand in dict.fromkeys(b + x for b in base for x in sfx):  # reihenfolge-erhaltend, ohne Doppelte
                 info = self.mt5.symbol_info(cand)
                 if info is not None:
                     if not info.visible:
@@ -429,24 +431,34 @@ class Runner:
         df = self.closed_bars(name, prof["markets"][name])
         if info is None or tick is None or df is None:
             raise RuntimeError(f"{sym}: keine Kurse (Markt geschlossen?)")
-        stop = atr_last(df) * prof.get("atr_stop_mult", 2.0)
+        mult, rr = self.exit_params(prof)
+        stop = atr_last(df) * mult
         if not stop > 0:
             raise RuntimeError(f"{sym}: ATR unbrauchbar")
         stop = max(stop, (info.trade_stops_level or 0) * info.point * 1.1)  # Broker-Mindestabstand
         long = direction == "long"
         price = tick.ask if long else tick.bid
         sl = round(price - stop if long else price + stop, info.digits)
-        tp = round(price + stop * prof.get("rr", 2.0) if long else price - stop * prof.get("rr", 2.0), info.digits)
+        tp = round(price + stop * rr if long else price - stop * rr, info.digits)
         calc = self.calc_lots(sym, direction, price, sl, prof.get("risk_percent", 1.0))
         if calc is None:
             raise RuntimeError(f"{sym}: Lotgröße nicht berechenbar oder Risiko zu hoch (Konto zu klein?)")
         lots, risk = calc
-        return {"sym": sym, "price": price, "sl": sl, "tp": tp, "lots": lots, "risk": risk}
+        return {"sym": sym, "price": price, "sl": sl, "tp": tp, "lots": lots, "risk": risk, "mult": mult, "rr": rr}
+
+    @staticmethod
+    def exit_params(prof: dict) -> tuple[float, float]:
+        """Stop-Abstand (x ATR) und Ziel (x Stop): die Werte der STRATEGIE haben Vorrang (so wurde getestet), sonst die des Profils."""
+        strat = prof.get("strat")
+        mult, rr = prof.get("atr_stop_mult", 2.0), prof.get("rr", 2.0)
+        if strat is not None and hasattr(strat, "stop_mult"):
+            mult, rr = strat.stop_mult(mult), strat.rr(rr)
+        return mult, rr
 
     def plan_order(self, prof: dict, name: str, direction: str) -> str:
         pl = self._order_plan(prof, name, direction)
         return (f"{pl['lots']} Lots @ {pl['price']} | Stop {pl['sl']} | Ziel {pl['tp']}\n"
-                f"Risiko {pl['risk']:.2f} ({prof.get('risk_percent', 1.0)} % des Kontos, {prof.get('atr_stop_mult', 2.0)}xATR, Ziel {prof.get('rr', 2.0)}R)")
+                f"Risiko {pl['risk']:.2f} ({prof.get('risk_percent', 1.0)} % des Kontos, {pl['mult']:g}xATR, Ziel {pl['rr']:g}R)")
 
     def manual_profile(self) -> dict | None:
         m = getattr(self.cfg, "MANUAL", None)
@@ -484,7 +496,7 @@ class Runner:
             tf = prof["markets"].get(self._market_of(prof, newest) or "", "")
             self.state.setdefault("trades", {}).setdefault(str(newest.ticket), {})["reason"] = (
                 f"{direction.upper()} {sym} {tf} ({prof['name']}): {why}\n"
-                f"Risiko {risk:.2f} (= {prof.get('risk_percent', 1.0)} % des Kontos), Stop {sl} ({prof.get('atr_stop_mult', 2.0)}xATR), Ziel {tp} ({prof.get('rr', 2.0)}R)")
+                f"Risiko {risk:.2f} (= {prof.get('risk_percent', 1.0)} % des Kontos), Stop {sl} ({pl['mult']:g}xATR), Ziel {tp} ({pl['rr']:g}R)")
             self._save_state()
         return True
 

@@ -108,7 +108,8 @@ def summarize_spec(out: dict, min_trades: int) -> dict:
         for y, r in v["years"].items():
             years[y].append(r)
     yr = {y: statistics.mean(r) for y, r in years.items() if len(r) >= 8 and y not in (min(years),)}  # erstes (Teil-)Jahr auslassen
-    return {"markets": len(rows), "pf": pf, "base_pf": statistics.median(base) if base else None, "plus": sum(v["ret"] > 0 for v in rows.values()) / len(rows) * 100,
+    robust_markets = sorted((k for k, v in rows.items() if v["pf"] >= 1.2 and v["ret"] > 0), key=lambda k: -rows[k]["pf"])
+    return {"robust_markets": robust_markets, "markets": len(rows), "pf": pf, "base_pf": statistics.median(base) if base else None, "plus": sum(v["ret"] > 0 for v in rows.values()) / len(rows) * 100,
             "years_pos": sum(r > 0 for r in yr.values()), "years_n": len(yr), "worst_year": min(yr.values()) if yr else 0.0,
             "worst_year_n": min(yr, key=yr.get) if yr else None, "per_year": statistics.median(v["n"] / v["span_years"] for v in rows.values()),
             "dd_med": statistics.median(v["dd"] for v in rows.values()), "dd_worst": max(v["dd"] for v in rows.values())}
@@ -117,17 +118,25 @@ def summarize_spec(out: dict, min_trades: int) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--interval", default="1d", choices=["1d", "4h", "1h"])
-    ap.add_argument("--from-csv", type=int, default=0, help="statt kandidaten.json: die N besten Konfigurationen aus alle_konfigurationen.csv (Parameter müssen im Namen stehen)")
+    ap.add_argument("--specs", default="kandidaten", help="kandidaten (Standard: kandidaten.json der Tiefensuche) | defaults (alle bisherigen Standard-Strategien des Bots, "
+                    "z. B. um die Video-Methode und die Final-3 gegen Zufall zu prüfen) | Pfad zu einer JSON-Datei mit [{type, params}, ...]")
     ap.add_argument("--workers", type=int, default=0)
     ap.add_argument("--config", default=str(T.ROOT / "config.yaml"))
     ap.add_argument("--demo", action="store_true")
     ap.add_argument("--limit", type=int, default=0)
     a = ap.parse_args()
     src = Path(__file__).parent / "out" / (("demo_" if a.demo else "") + f"tiefensuche_{a.interval}")
-    out_dir = Path(__file__).parent / "out" / (("demo_" if a.demo else "") + f"nachpruefung_{a.interval}")
+    tag = "" if a.specs == "kandidaten" else "_" + Path(a.specs).stem
+    out_dir = Path(__file__).parent / "out" / (("demo_" if a.demo else "") + f"nachpruefung_{a.interval}{tag}")
     out_dir.mkdir(parents=True, exist_ok=True)
-    cands = json.loads((src / "kandidaten.json").read_text(encoding="utf-8")) if (src / "kandidaten.json").exists() else []
-    specs = [{"type": c["type"], "params": c["params"]} for c in cands]
+    if a.specs == "defaults":
+        from tradingbot.strategies import DEFAULT_SPECS
+        specs = [{"type": t, "params": p} for t, p in DEFAULT_SPECS]
+    elif a.specs == "kandidaten":
+        cands = json.loads((src / "kandidaten.json").read_text(encoding="utf-8")) if (src / "kandidaten.json").exists() else []
+        specs = [{"type": c["type"], "params": c["params"]} for c in cands]
+    else:
+        specs = [{"type": c["type"], "params": c["params"]} for c in json.loads(Path(a.specs).read_text(encoding="utf-8"))]
     if not specs:
         print(f"Keine Kandidaten in {src / 'kandidaten.json'} – erst `python -m survey.tiefensuche` laufen lassen (oder keiner hat bestanden).")
         return 1
@@ -156,7 +165,7 @@ def main() -> int:
     L = [f"NACHPRÜFUNG DER KANDIDATEN  Zeitrahmen {a.interval}  |  {len(frames)} Märkte  |  {len(specs)} Kandidaten", "",
          "Spalten: PF = Profitfaktor nach Kosten (ganze Reihe) | Zufall = PF mit zufälligen Einstiegen und denselben Ausstiegen | Edge = PF minus Zufall |",
          "Jahre+ = Kalenderjahre mit positiver Durchschnittsrendite | Schlecht. = schlechtestes Jahr | T/J = Trades je Markt und Jahr | Nachb. = PF der Nachbar-Parameter (Median)", "",
-         "{:<64}{:>5}{:>7}{:>6}{:>8}{:>16}{:>5}{:>7}{:>7}  Urteil".format("Strategie", "PF", "Zufall", "Edge", "Jahre+", "Schlecht.", "T/J", "DDmed", "Nachb.")]
+         "{:>2} {:<61}{:>5}{:>7}{:>6}{:>8}{:>16}{:>5}{:>7}{:>7}  Urteil".format("Nr", "Strategie", "PF", "Zufall", "Edge", "Jahre+", "Schlecht.", "T/J", "DDmed", "Nachb.")]
     rows = []
     for k, (spec, out) in main_res.items():
         sm = summarize_spec(out, min_trades)
@@ -178,14 +187,21 @@ def main() -> int:
         verdict = ("ROBUST" if solid and sm["per_year"] >= 2 else "ROBUST, ABER SELTEN" if solid else "SCHWACH: " + ", ".join(notes))
         rows.append((spec, sm, nb_pf, edge, verdict, solid))
     rows.sort(key=lambda r: (not r[5], -r[3]))
-    for spec, sm, nb_pf, edge, verdict, _ in rows:
+    export = []
+    for nr, (spec, sm, nb_pf, edge, verdict, solid) in enumerate(rows, 1):
+        export.append({"nr": nr, "type": spec["type"], "params": spec["params"], "name": build_strategy(spec).name, "verdict": verdict, "robust": bool(solid),
+                       "pf": round(sm["pf"], 3), "edge": round(edge, 3), "trades_per_year": round(sm["per_year"], 2), "years_positive": f"{sm['years_pos']}/{sm['years_n']}",
+                       "robust_markets": sm["robust_markets"]})
+    (out_dir / "nachpruefung.json").write_text(json.dumps(export, indent=2, ensure_ascii=False), encoding="utf-8")
+    for nr, (spec, sm, nb_pf, edge, verdict, _) in enumerate(rows, 1):
         yrs = "{}/{}".format(sm["years_pos"], sm["years_n"])
         worst = "{:+.1f}% ({})".format(sm["worst_year"], sm["worst_year_n"])
-        L.append("{:<64}{:>5.2f}{:>7.2f}{:>+6.2f}{:>8}{:>16}{:>5.1f}{:>6.1f}%{:>7.2f}  {}".format(
-            build_strategy(spec).name[:62], sm["pf"], sm["base_pf"] or 0, edge, yrs, worst, sm["per_year"], sm["dd_med"], nb_pf if nb_pf is not None else 0, verdict))
+        L.append("{:>2} {:<61}{:>5.2f}{:>7.2f}{:>+6.2f}{:>8}{:>16}{:>5.1f}{:>6.1f}%{:>7.2f}  {}".format(
+            nr, build_strategy(spec).name[:60], sm["pf"], sm["base_pf"] or 0, edge, yrs, worst, sm["per_year"], sm["dd_med"], nb_pf if nb_pf is not None else 0, verdict))
     robust = [r for r in rows if r[5]]
     L += ["", f"ROBUST: {len(robust)} von {len(rows)}. 'Edge' zeigt, wie viel die Einstiegs-Idee wirklich beiträgt: Ist er klein, steckt der Gewinn im Markt (steigende Kurse) und in der Stop-Struktur, nicht in der Strategie.",
           "Wichtig: Wenige Trades je Markt und Jahr (T/J < 2) heißen, dass der Bot kaum handelt und jede Aussage auf wenigen Trades beruht."]
+    L += ["", "Weiter: Profil für den MT5-Bot erzeugen, z. B.   python -m survey.profil_erzeugen --von " + out_dir.name + " --wahl 1 2 3    (oder --auto 3)"]
     txt = "\n".join(L)
     (out_dir / "ergebnisse.txt").write_text(txt, encoding="utf-8")
     print("\n" + txt + f"\n\nFERTIG. Schick mir diese Datei: {out_dir / 'ergebnisse.txt'}")

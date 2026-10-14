@@ -341,3 +341,56 @@ def test_broker_side_close_is_recorded_with_reason(tmp_path):
     ev = [e for e in r.events if e["kind"] == "VERKAUF"]
     assert ev and "Stop-Loss getroffen" in ev[-1]["text"] and "-98.00" in ev[-1]["text"] and "ursprüngliche Begründung" in ev[-1]["text"]
     assert str(ticket) not in r.state["trades"]
+
+
+def test_strategy_exit_params_override_profile_values(tmp_path):
+    """Stop und Ziel der Strategie (wie getestet) haben Vorrang vor den Profilwerten."""
+    c = cfg()
+    c.PROFILES[0]["strategy"] = {"type": "ma_pullback", "params": {"ma_period": 50, "slope_bars": 10, "touch_pct": 0.5, "exit_pct": 3.0, "stop_mult": 4.0, "rr": 3.0}}
+    r, mt5 = run_signal(tmp_path, c=c)
+    p = mt5.positions[0]
+    price = mt5.sent[0]["price"]
+    assert abs((p.tp - price) / (price - p.sl) - 3.0) < 0.05           # Ziel = 3 x Stop (nicht 2)
+    base_stop = price - p.sl
+    r2, mt52 = run_signal(tmp_path / "b" if (tmp_path / "b").mkdir() is None else tmp_path, c=cfg())
+    assert base_stop > (mt52.sent[0]["price"] - mt52.positions[0].sl) * 1.9     # 4 x ATR statt 2 x ATR
+    assert "4xATR" in next(iter(r.state["trades"].values()))["reason"] and "3R" in next(iter(r.state["trades"].values()))["reason"]
+
+
+def test_symbol_suffixes_and_aliases_resolve_broker_names(tmp_path):
+    series = signal_series()
+    for broker_name in ("XAUUSDm", "GOLD", "XAUUSD.a"):
+        mt5 = FakeMT5({broker_name: bars(series)})
+        r = Runner(mt5, cfg(), tmp_path)
+        r.connect()
+        assert r.symbols["XAUUSD"] == broker_name
+
+
+def test_generated_profile_text_is_valid_and_usable(tmp_path):
+    """survey.profil_erzeugen: erzeugter Text lässt sich einfügen und der Bot akzeptiert ihn."""
+    import ast
+    import json
+    import subprocess
+    import sys
+
+    out = tmp_path / "out" / "nachpruefung_x"
+    out.mkdir(parents=True)
+    (out / "nachpruefung.json").write_text(json.dumps([
+        {"nr": 1, "type": "squeeze_breakout", "params": {"period": 19, "bb_mult": 2.37, "kc_mult": 1.88, "stop_mult": 4.0, "rr": 3.0}, "name": "squeeze_breakout(...)",
+         "verdict": "ROBUST", "robust": True, "pf": 1.74, "edge": 0.69, "trades_per_year": 3.1, "years_positive": "9/9", "robust_markets": ["Gold", "Silber", "Schwellenländer"]}]))
+    import survey.profil_erzeugen as pe
+    old = pe.OUT
+    pe.OUT = tmp_path / "out"
+    try:
+        sys.argv = ["x", "--von", "nachpruefung_x", "--auto", "1"]
+        assert pe.main() == 0
+    finally:
+        pe.OUT = old
+    text = (tmp_path / "out" / "neues_profil.txt").read_text(encoding="utf-8")
+    assert "Schwellenländer" in text and '"XAUUSD": "D1"' in text and '"XAGUSD": "D1"' in text
+    profiles = ast.literal_eval("[" + text + "]")
+    c = cfg()
+    c.PROFILES = profiles
+    mt5 = FakeMT5({"XAUUSD": bars(signal_series()), "XAGUSD": bars(signal_series())})
+    r = Runner(mt5, c, tmp_path)
+    assert r.profiles[0]["strat"].stop_mult(2.0) == 4.0 and r.profiles[0]["strat"].rr(2.0) == 3.0

@@ -33,6 +33,13 @@ class LibraryStrategy:
     def name(self) -> str:
         return self.strat.name
 
+    # Stop-Abstand (x ATR) und Ziel (x Stop) der Strategie – so wurde getestet, so wird gehandelt
+    def stop_mult(self, default: float) -> float:
+        return self.strat.stop_mult(default)
+
+    def rr(self, default: float) -> float:
+        return self.strat.rr(default)
+
     def _frames(self, df):
         return df, (invert(df) if self.allow_short else None)
 

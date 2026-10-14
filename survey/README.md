@@ -49,3 +49,12 @@ python -m survey.nachpruefen --interval 1d
 Liest `kandidaten.json` der Tiefensuche und prüft über die ganze Reihe: **Edge gegen Zufalls-Einstiege** (gleiche Ausstiege, zufällige Einstiege), **Jahre im Plus**,
 **Trades je Markt und Jahr**, Drawdown und **Parameter-Nachbarn**. Urteil: ROBUST / ROBUST, ABER SELTEN / SCHWACH. Ergebnis: `survey/out/nachpruefung_1d/ergebnisse.txt`.
 Hintergrund: Ist der Testzeitraum für Kauf-Strategien günstig, sind auch Zufalls-Einstiege profitabel; nur der Abstand dazu zählt als echter Beitrag der Strategie.
+
+## Vom Kandidaten zum Bot-Profil
+```
+python -m survey.nachpruefen --interval 1d            # Tabelle mit Nr, Urteil ROBUST/SELTEN/SCHWACH; schreibt nachpruefung.json
+python -m survey.nachpruefen --specs defaults         # dasselbe für ALLE bisherigen Standard-Strategien (Video-Methode, Final-3 …) gegen Zufall
+python -m survey.profil_erzeugen --von nachpruefung_1d --auto 3      # die 3 besten ROBUSTEN, je Typ höchstens eine
+python -m survey.profil_erzeugen --von nachpruefung_1d --wahl 2 5 7  # oder bestimmte Nummern
+```
+`profil_erzeugen` schreibt fertige Profil-Einträge (nur robuste Märkte, MetaTrader-Symbolnamen, Stop/Ziel der Strategie) nach `survey/out/neues_profil.txt`; den Text in `PROFILES` in `mt5bot/config.py` einfügen.

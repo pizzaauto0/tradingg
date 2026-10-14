@@ -76,7 +76,8 @@ Prüfe vor der Aufnahme den **echten Spread und Swap** deines Brokers für den M
 2. `python survey/survey.py --interval 1d` (10 Jahre) und `--interval 1d --years 2` (letzte 2 Jahre) und optional `--interval 4h`.
 3. Kostenstress: `python survey/survey.py --interval 1d --cost-mult 2`.
 4. `python -m survey.pruefen --runs 1d 1d_2y --stress 1d_x2` → Urteil **ÜBERNEHMEN / BEOBACHTEN / ABLEHNEN**.
-5. `python survey/pick.py --interval 1d` wählt die Märkte, auf denen sie robust ist (nur dort einsetzen).
+4b. Neue Idee durch Parametersuche gefunden (`python -m survey.tiefensuche`)? Dann zusätzlich `python -m survey.nachpruefen`: **Edge gegen Zufalls-Einstiege** muss ≥ +0,20 sein, mindestens 70 % der Jahre im Plus, Nachbar-Parameter PF ≥ 1,05. Sonst steckt der Gewinn im steigenden Markt und nicht in der Strategie.
+5. `python survey/pick.py --interval 1d` (oder `python -m survey.profil_erzeugen`) wählt die Märkte, auf denen sie robust ist (nur dort einsetzen).
 6. **Demo-Abnahme:** mindestens 4 Wochen und 10 Trades auf dem Demo-Konto. Trefferquote und Profitfaktor müssen grob zum Test passen (Trefferquote ±15 Punkte, Profitfaktor > 1). Auswertung: `mt5bot_trades.csv` oder Telegram `/stats`.
 7. Erst danach Echtgeld erwägen, mit kleinem Betrag und weiter mit Stop-Loss und Tageslimit.
 

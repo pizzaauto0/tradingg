@@ -46,11 +46,23 @@ DASHBOARD_PHONE = True                    # True: auch vom Handy im gleichen WLA
 # Andere Bots, die auf demselben Konto laufen (Magic Number -> Name), damit die Oberfläche ihre Positionen benennen kann
 KNOWN_BOTS = {100001: "1-Haupt-Bot", 100002: "2-David-V2", 100003: "3-Divergenz-Gold-Silber"}
 
+# Zusätzlich probiert der Bot jeden Namen mit diesen Endungen (viele Broker hängen z. B. "m", ".a" oder ".US" an):
+SYMBOL_SUFFIXES = ["", ".a", "m", ".r", ".pro", ".cash", ".US", ".us", "+"]
+
 # Manche Broker nennen Symbole anders (z. B. GOLD statt XAUUSD): der Bot probiert diese Namen der Reihe nach.
 SYMBOL_ALIASES = {
     "XAUUSD": ["XAUUSD", "GOLD", "XAUUSD.a", "XAUUSDm"],
     "XAGUSD": ["XAGUSD", "SILVER", "XAGUSD.a", "XAGUSDm"],
     "XPTUSD": ["XPTUSD", "PLATINUM", "XPTUSDm"],
+    "XCUUSD": ["XCUUSD", "COPPER", "COPPER-C", "HG"],
+    "USOIL": ["USOIL", "XTIUSD", "WTI", "CL-OIL", "USOUSD", "OIL"],
+    "NATGAS": ["NATGAS", "XNGUSD", "NGAS", "NG-C"],
+    "US500": ["US500", "SPX500", "SP500", "US500.cash", "USA500"],
+    "USTEC": ["USTEC", "NAS100", "US100", "NDX100", "USTEC.cash"],
+    "US30": ["US30", "DJ30", "WS30", "DJI30", "US30.cash"],
+    "US2000": ["US2000", "RUSSELL2000", "RTY", "US2000.cash"],
+    "DE40": ["DE40", "GER40", "GER30", "DAX40", "DE30"],
+    "JP225": ["JP225", "NIKKEI225", "JPN225", "NI225"],
 }
 
 # --- Profile ---
