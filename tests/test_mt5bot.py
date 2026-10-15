@@ -51,6 +51,8 @@ class FakeMT5:
     def terminal_info(self): return namedtuple("TI", "connected trade_allowed")(True, getattr(self, "algo", True))
 
     def order_send(self, req):
+        if not getattr(self, "algo", True):
+            return Res(10027, 0)
         self.sent.append(req)
         if req["action"] == self.TRADE_ACTION_SLTP:
             if self.sltp_fails:
@@ -425,3 +427,23 @@ def test_replay_signals_matches_entry_on_each_bar():
     fast = replay_signals(s, df, None, 100)
     slow = [df.index[i] for i in range(len(df) - 100, len(df)) if s.entry(df.iloc[: i + 1])]
     assert fast == slow and len(fast) >= 1
+
+
+def test_algo_trading_off_is_reported_clearly_and_orders_explain_why(tmp_path):
+    series = signal_series()
+    mt5 = FakeMT5({"XAUUSD": bars(series + [series[-1]])})
+    mt5.algo = False
+    r = Runner(mt5, cfg(), tmp_path)
+    r.connect()
+    mt5.n = len(series)
+    r.step()
+    assert any(e["kind"] == "FEHLER" and "Algo-Handel AUS" in e["head"] for e in r.events)   # sofort gemeldet
+    mt5.n += 1
+    r.step()
+    assert not mt5.positions
+    err = [e for e in r.events if e["kind"] == "FEHLER" and "Order nicht ausgeführt" in e["text"]]
+    assert err and "Algo-Handel im MetaTrader-Terminal ist AUS" in err[-1]["text"] and "10027" in err[-1]["text"]
+    mt5.algo = True                                   # eingeschaltet: nächste Prüfung meldet 'wieder AN'
+    r._algo_checked = -1e9
+    r.algo_watch()
+    assert any("wieder AN" in e["text"] for e in r.events)

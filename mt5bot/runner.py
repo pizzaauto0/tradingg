@@ -28,6 +28,21 @@ from . import history
 from .signals import atr_last, make_strategy, replay_signals
 
 TF_NAMES = ("M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1")
+# Häufige Ablehnungsgründe von MetaTrader in verständlichem Deutsch
+RETCODE_TEXT = {
+    10027: "Algo-Handel im MetaTrader-Terminal ist AUS → oben auf den Knopf 'Algo-Handel' klicken (grün) und Extras → Optionen → Experten → 'Algo-Handel zulassen'",
+    10026: "Algo-Handel ist vom Server/Broker für dieses Konto deaktiviert",
+    10018: "Markt ist geschlossen",
+    10019: "Nicht genug Guthaben/Margin für diese Order",
+    10014: "Ungültige Ordergröße (Lots)",
+    10015: "Ungültiger Preis",
+    10016: "Ungültige Stop-Loss/Take-Profit-Abstände (zu nah am Kurs)",
+    10030: "Der Broker unterstützt diese Ausführungsart nicht",
+    10024: "Zu viele Anfragen",
+    10031: "Keine Verbindung zum Handelsserver",
+    10032: "Handel auf dem Echtgeld-Konto nicht erlaubt",
+    10017: "Handel für dieses Symbol ist deaktiviert",
+}
 log = logging.getLogger("mt5bot")
 
 
@@ -481,7 +496,10 @@ class Runner:
                "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC}
         res = self._send(req)
         if not res or res.retcode != mt5.TRADE_RETCODE_DONE:
-            log.error(f"{sym}: Order abgelehnt (Retcode {res.retcode if res else '?'}) – es wird KEIN ungeschützter Ersatz-Trade platziert.")
+            code = res.retcode if res else None
+            why_txt = RETCODE_TEXT.get(code, f"Retcode {code} (siehe MetaTrader-Journal)") if res else f"keine Antwort vom Terminal ({mt5.last_error()})"
+            self.last_order_error = f"{why_txt} [Retcode {code}]"
+            log.error(f"{sym}: Order abgelehnt: {why_txt} – es wird KEIN ungeschützter Ersatz-Trade platziert.")
             return False
         acc = mt5.account_info()
         log.info(f"ORDER AUSGEFÜHRT: {direction.upper()} {sym} {lots} Lots @ {res.price} | SL {sl} | TP {tp} | Risiko {risk:.2f} | {prof['name']}")
@@ -758,6 +776,25 @@ class Runner:
         return datetime.fromtimestamp(min(times), timezone.utc).isoformat() if times else None
 
     # ---------- ein Durchlauf ----------
+    def algo_watch(self) -> None:
+        """Meldet (alle 6 Stunden, nicht öfter), wenn der Algo-Handel im Terminal ausgeschaltet ist – dann würde jede Order abgelehnt."""
+        if time.monotonic() - getattr(self, "_algo_checked", -1e9) < 60:
+            return
+        self._algo_checked = time.monotonic()
+        try:
+            allowed = bool(getattr(self.mt5.terminal_info(), "trade_allowed", True))
+        except Exception:
+            return
+        if allowed:
+            if getattr(self, "_algo_off_since", None) is not None:
+                self._algo_off_since = None
+                self.event("FEHLER", "Algo-Handel", "Algo-Handel ist wieder AN")
+            return
+        if getattr(self, "_algo_off_since", None) is None or time.monotonic() - self._algo_off_since > 6 * 3600:
+            self._algo_off_since = time.monotonic()
+            log.warning("ALGO-HANDEL IM TERMINAL IST AUS – Orders werden abgelehnt. Oben in MetaTrader auf 'Algo-Handel' klicken (grün).")
+            self.event("FEHLER", "Algo-Handel AUS", RETCODE_TEXT[10027])
+
     def step(self) -> None:
         if self.kill_requested():
             for pos in self.positions():
@@ -770,6 +807,7 @@ class Runner:
         self._kill_logged = False
         if self.mt5.account_info() is None:
             self.reconnect()
+        self.algo_watch()
         allowed = self.day_check() and not self.state.get("paused")
         self.track_positions()
         self.manage_open()
@@ -812,10 +850,11 @@ class Runner:
                     self.event("BLOCKIERT", head, f"Signal {direction.upper()}, aber Positionslimit ({self.cfg.MAX_OPEN_POSITIONS}) erreicht", checks)
                     continue
                 why = f"{strat.name}: " + "; ".join(t for _, t in checks)
+                self.last_order_error = None
                 if self.place(prof, name, direction, why):
                     self.event("KAUF", head, f"{direction.upper()} eröffnet", checks)
                 else:
-                    self.event("FEHLER", head, f"Signal {direction.upper()}, aber Order nicht ausgeführt (Details im Log: Lot-Größe, Ablehnung, Spread)", checks)
+                    self.event("FEHLER", head, f"Signal {direction.upper()}, aber Order nicht ausgeführt: {self.last_order_error or 'Lot-Größe nicht berechenbar, Spread oder Ablehnung (Details im Log)'}", checks)
 
     def diagnose_text(self) -> str:
         """„Warum kein Trade?“: prüft Verbindung, Algo-Handel, Symbole, Kerzen und zeigt, wie oft die Strategie früher ein Signal gegeben hätte."""
