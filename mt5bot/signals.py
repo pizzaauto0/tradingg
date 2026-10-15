@@ -223,6 +223,24 @@ class GoldSilverDivergence:
         return f"Differenz {d.iloc[-1]:+.4f} | Band {band.iloc[-1]:+.4f} | {'UNTER dem Band (bereit)' if d.iloc[-1] <= band.iloc[-1] else 'über dem Band'}"
 
 
+def replay_signals(strat, df: pd.DataFrame, extra: dict | None, last_bars: int) -> list:
+    """Zeitpunkte (Kerzenindex) der letzten `last_bars` Kerzen, an denen die Strategie ein Einstiegssignal gegeben HÄTTE (nur Rückblick, kein Handel)."""
+    n = len(df)
+    start = max(getattr(strat, "min_bars", 100), n - last_bars)
+    hits = []
+    if isinstance(strat, LibraryStrategy):  # schnell: ganze Reihe auf einmal
+        ent = strat.strat.entry(df)
+        ok = regime_series(df).isin(strat.strat.regimes)
+        sig = (ent & ok).to_numpy()
+        return [df.index[i] for i in range(start, n) if sig[i]]
+    for i in range(start, n):
+        sub = df.iloc[: i + 1]
+        ex = {k: v.loc[: sub.index[-1]] for k, v in (extra or {}).items() if v is not None}
+        if strat.entry(sub, ex):
+            hits.append(df.index[i])
+    return hits
+
+
 def make_strategy(spec: dict, allow_short: bool):
     t = spec["type"]
     if t == "rsi_pullback":

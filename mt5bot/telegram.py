@@ -36,11 +36,12 @@ MAIN_KEYBOARD = {"keyboard": [[{"text": "📊 Status"}, {"text": "📋 Trades"}]
                               [{"text": "📈 Märkte"}, {"text": "🧾 Statistik"}],
                               [{"text": "⏸ Pause"}, {"text": "▶ Weiter"}],
                               [{"text": "❌ Alle schließen"}, {"text": "🛑 Not-Aus"}],
-                              [{"text": "📄 Bericht"}, {"text": "🔔 Log"}]],
+                              [{"text": "📄 Bericht"}, {"text": "🔔 Log"}],
+                              [{"text": "🩺 Diagnose"}]],
                  "resize_keyboard": True, "is_persistent": True}
 BUTTON_COMMANDS = {"📊 Status": "/status", "📋 Trades": "/trades", "🟢 Kaufen": "/kaufen", "🔴 Verkaufen": "/verkaufen", "📈 Märkte": "/markets",
                    "🧾 Statistik": "/stats", "⏸ Pause": "/pause", "▶ Weiter": "/resume", "❌ Alle schließen": "/closeall", "🛑 Not-Aus": "/kill",
-                   "📄 Bericht": "/report", "🔔 Log": "/log", "☰ Menü": "/menu"}
+                   "📄 Bericht": "/report", "🔔 Log": "/log", "🩺 Diagnose": "/diagnose", "☰ Menü": "/menu"}
 RISKS = (0.25, 0.5, 1.0, 2.0)
 
 
@@ -57,7 +58,7 @@ ANSEHEN
 /status – Konto, Tages-P&L, Zustand
 /trades – alle offenen Trades
 /trade <Nr> – ein Trade mit Begründung
-/markets – Zustand der Märkte (warum Kauf / kein Kauf)
+/markets – Zustand der Märkte (warum Kauf / kein Kauf)\n/diagnose – „Warum kein Trade?“: Prüfung + Signal-Rückblick
 /stats – Kennzahlen, Woche/Monat
 /log – letzte Ereignisse
 /report – ausführlicher Bericht jetzt
@@ -240,7 +241,7 @@ class TelegramBridge:
         cmd, *args = text.split()
         cmd = cmd.split("@")[0].lower()
         table = {"/start": self.c_menu, "/menu": self.c_menu, "/help": self.c_help, "/status": self.c_status, "/trades": self.c_trades, "/trade": self.c_trade,
-                 "/markets": self.c_markets, "/stats": self.c_stats, "/log": self.c_log, "/report": self.c_report, "/close": self.c_close,
+                 "/markets": self.c_markets, "/diagnose": self.c_diagnose, "/stats": self.c_stats, "/log": self.c_log, "/report": self.c_report, "/close": self.c_close,
                  "/closeall": self.c_closeall, "/buy": lambda a: self.c_open("long", a), "/sell": lambda a: self.c_open("short", a),
                  "/kaufen": lambda a: self.pick_symbol("long"), "/verkaufen": lambda a: self.pick_symbol("short"),
                  "/kill": self.c_kill, "/pause": self.c_pause, "/resume": self.c_resume, "/ja": self.c_yes, "/nein": self.c_no}
@@ -366,6 +367,12 @@ class TelegramBridge:
                 checks, sig = prof["strat"].explain(df, extra), prof["strat"].entry(df, extra)
                 lines.append(f"[{prof['name']}] {name} {tf}: {'SIGNAL ' + sig.upper() if sig else 'kein Signal'}\n" + r.fmt_checks(checks).replace("      ", "   "))
         self.say("\n\n".join(lines) or "Keine Märkte aktiv.", MAIN_KEYBOARD)
+
+    def c_diagnose(self, a) -> None:
+        parts = chunks(self.r.diagnose_text())
+        for part in parts[:6]:
+            self.say(part)
+        self.say("Fertig.", MAIN_KEYBOARD)
 
     def c_stats(self, a) -> None:
         s = history.summary(self.r.folder)

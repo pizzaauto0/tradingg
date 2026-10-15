@@ -85,6 +85,11 @@ Bei einem Sicherheitsstopp (Echtgeld-Konto erkannt) startet der Bot bewusst nich
 Unter „Kapital & Ergebnis": Kapitalkurve (Messpunkt alle 5 Minuten, 7 Tage / 30 Tage / alles), Ergebnis heute/Woche/Monat, Trefferquote, Profitfaktor, Ø R,
 Kennzahlen je Profil und die Liste der abgeschlossenen Trades (mit R, Ergebnis, Dauer, Grund). Daten: `mt5bot_trades.csv`, `mt5bot_equity.csv`. Telegram `/stats` zeigt dasselbe.
 
+## „Warum macht der Bot keinen Trade?“ – Diagnose
+`mt5bot\py.bat -m mt5bot.diagnose` (oder in Telegram die Taste **🩺 Diagnose**, `/diagnose`) prüft in einer Übersicht: Verbindung zum Broker, **Algo-Handel an/aus**, Konto-Erlaubnis, Pause/Limits, ob jedes Symbol gefunden wird, Kerzen und deren Alter,
+und zeigt einen **Rückblick**: wie oft die Strategie in der Historie ein Signal gegeben hätte (pro Jahr / letzte 30 Tage) und was jetzt zum Signal fehlt. Daraus ergibt sich die Erwartung („ca. X Signale pro Monat“).
+Um die Funktion des Bots unabhängig von Signalen zu testen: Telegram 🟢 Kaufen oder Portal → Kaufen auf dem Demo-Konto.
+
 ## Protokolle: warum gekauft, warum nicht
 Im Ordner `logs/` (im Projektordner) schreibt der Bot von selbst:
 - **`entscheidungen_<Datum>.log`** – jede ausgewertete Kerze: Kauf, **kein Kauf mit den nicht erfüllten Bedingungen** (✔/✘ je Bedingung mit den echten Zahlen), blockierte Signale (Positionslimit, Tageslimit), Order-Fehler, Verkäufe (Ausstiegssignal, Stop-Loss, Take-Profit, Kill-Switch) und Tageslimit-Ereignisse.

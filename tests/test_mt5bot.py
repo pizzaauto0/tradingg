@@ -48,6 +48,7 @@ class FakeMT5:
     def copy_rates_from_pos(self, s, tf, pos, n): return self.data[s][: self.n][-n:]
     def order_calc_profit(self, t, s, vol, entry, sl): return -abs(entry - sl) * vol * 100
     def positions_get(self, **kw): return list(self.positions)
+    def terminal_info(self): return namedtuple("TI", "connected trade_allowed")(True, getattr(self, "algo", True))
 
     def order_send(self, req):
         self.sent.append(req)
@@ -394,3 +395,33 @@ def test_generated_profile_text_is_valid_and_usable(tmp_path):
     mt5 = FakeMT5({"XAUUSD": bars(signal_series()), "XAGUSD": bars(signal_series())})
     r = Runner(mt5, c, tmp_path)
     assert r.profiles[0]["strat"].stop_mult(2.0) == 4.0 and r.profiles[0]["strat"].rr(2.0) == 3.0
+
+
+def test_diagnose_explains_why_no_trade_and_counts_past_signals(tmp_path):
+    series = signal_series()
+    mt5 = FakeMT5({"XAUUSD": bars(series + [series[-1]])})
+    r = Runner(mt5, cfg(), tmp_path)
+    r.connect()
+    mt5.n = len(series) + 1
+    text = r.diagnose_text()
+    for part in ("1. VERBINDUNG", "Algo-Handel", "2. MÄRKTE UND SIGNALE", "XAUUSD (H4)", "Rückblick:", "3. ERWARTUNG", "Jetzt: SIGNAL"):
+        assert part in text, part
+    mt5.algo = False
+    assert "✘ 'Algo-Handel' im Terminal AN" in r.diagnose_text()
+    mt5b = FakeMT5({})
+    r2 = Runner(FakeMT5({"XAUUSD": bars(series)}), cfg(), tmp_path)
+    r2.connect()
+    r2.symbols.pop("XAUUSD")
+    assert "NICHT gefunden" in r2.diagnose_text()
+
+
+def test_replay_signals_matches_entry_on_each_bar():
+    from mt5bot.signals import make_strategy, replay_signals
+    s = make_strategy({"type": "ma_pullback", "params": {"ma_period": 50, "slope_bars": 10, "touch_pct": 0.5, "exit_pct": 3.0}}, False)
+    close = list(np.linspace(100, 160, 300)) + list(np.linspace(160, 152, 6)) + [155.0] + list(np.linspace(155, 170, 30))
+    import pandas as pd
+    a = bars(close)
+    df = pd.DataFrame(a).assign(time=lambda d: pd.to_datetime(d.time, unit="s", utc=True)).set_index("time")[["open", "high", "low", "close"]].assign(volume=1.0)
+    fast = replay_signals(s, df, None, 100)
+    slow = [df.index[i] for i in range(len(df) - 100, len(df)) if s.entry(df.iloc[: i + 1])]
+    assert fast == slow and len(fast) >= 1

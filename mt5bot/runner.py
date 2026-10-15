@@ -25,7 +25,7 @@ import pandas as pd
 
 from . import config as default_config
 from . import history
-from .signals import atr_last, make_strategy
+from .signals import atr_last, make_strategy, replay_signals
 
 TF_NAMES = ("M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1")
 log = logging.getLogger("mt5bot")
@@ -816,6 +816,78 @@ class Runner:
                     self.event("KAUF", head, f"{direction.upper()} eröffnet", checks)
                 else:
                     self.event("FEHLER", head, f"Signal {direction.upper()}, aber Order nicht ausgeführt (Details im Log: Lot-Größe, Ablehnung, Spread)", checks)
+
+    def diagnose_text(self) -> str:
+        """„Warum kein Trade?“: prüft Verbindung, Algo-Handel, Symbole, Kerzen und zeigt, wie oft die Strategie früher ein Signal gegeben hätte."""
+        mt5, L = self.mt5, []
+        ok = lambda b: "✔" if b else "✘"  # noqa: E731
+        acc = mt5.account_info()
+        L.append("1. VERBINDUNG UND ERLAUBNISSE")
+        L.append(f"   {ok(acc is not None)} Konto: " + (f"{acc.login} ({acc.server}), {'DEMO' if acc.trade_mode == mt5.ACCOUNT_TRADE_MODE_DEMO else 'ECHTGELD'}, Kapital {acc.equity:.2f} {acc.currency}" if acc else "KEINE VERBINDUNG"))
+        try:
+            ti = mt5.terminal_info()
+            L.append(f"   {ok(getattr(ti, 'connected', True))} Terminal mit dem Broker verbunden")
+            L.append(f"   {ok(getattr(ti, 'trade_allowed', True))} 'Algo-Handel' im Terminal AN" + ("" if getattr(ti, "trade_allowed", True) else "  ← oben in MetaTrader auf den Knopf 'Algo-Handel' klicken (grün)"))
+        except Exception:
+            L.append("   (Terminal-Status nicht abrufbar)")
+        if acc is not None:
+            L.append(f"   {ok(getattr(acc, 'trade_allowed', True))} Konto darf handeln   {ok(getattr(acc, 'trade_expert', True))} Konto erlaubt Experten/Algo-Handel")
+        L.append(f"   {ok(not self.state.get('paused'))} nicht pausiert   {ok(not self.kill_requested())} kein Kill-Switch   {ok(self.halted_day is None)} Tageslimit nicht erreicht   "
+                 f"Positionen {len(self.positions())}/{self.cfg.MAX_OPEN_POSITIONS}")
+        L.append("")
+        L.append("2. MÄRKTE UND SIGNALE (Rückblick: wie oft hätte die Strategie ein Signal gegeben?)")
+        now = datetime.now(timezone.utc)
+        total_year = 0.0
+        for prof in self.profiles:
+            strat = prof["strat"]
+            L.append(f"   Profil '{prof['name']}': {strat.name}")
+            for name, tf in prof["markets"].items():
+                sym = self.symbols.get(name)
+                head = f"   - {name} ({tf})"
+                if sym is None:
+                    L.append(f"{head}: ✘ Symbol beim Broker NICHT gefunden → wird nie gehandelt (Namen in SYMBOL_ALIASES eintragen)")
+                    continue
+                df = self.closed_bars(name, tf)
+                if df is None or df.empty:
+                    L.append(f"{head}: ✘ {sym}: keine Kerzen (Markt geschlossen oder Symbol nicht im Marktfenster)")
+                    continue
+                tick = mt5.symbol_info_tick(sym)
+                tick_age = (now.timestamp() - tick.time) / 3600 if tick is not None and getattr(tick, "time", 0) else None
+                last = df.index[-1]
+                age_h = (now - last.to_pydatetime()).total_seconds() / 3600
+                step_h = (df.index[-1] - df.index[-2]).total_seconds() / 3600 if len(df) > 1 else 0
+                extra = {r: self.closed_bars(r, tf) for r in strat.needs}
+                bars_per_year = 365 * 24 / step_h if step_h else 0
+                try:
+                    hits = replay_signals(strat, df, extra, int(bars_per_year * 1.2) or len(df))
+                except Exception as e:  # Rückblick darf die Diagnose nie stoppen
+                    hits, L2 = [], f"Rückblick nicht möglich ({e})"
+                else:
+                    L2 = None
+                n_hist = len(df)
+                span_days = (df.index[-1] - df.index[0]).days or 1
+                per_year = len(hits) / min(span_days, 365 * 1.2) * 365 if hits is not None else 0
+                total_year += per_year
+                recent = [h for h in hits if (now - h.to_pydatetime()).days <= 30]
+                lines = f"{head}: {ok(True)} {sym}, {n_hist} Kerzen, letzte geschlossene {last:%Y-%m-%d %H:%M} UTC (vor {age_h:.1f} h)"
+                if tick_age is not None and tick_age > 3:
+                    lines += f"; ⚠ letzter Kurs vor {tick_age:.1f} h (Markt gerade zu?)"
+                L.append(lines)
+                L.append(("      " + L2) if L2 else f"      Rückblick: {len(hits)} Signal(e) in der verfügbaren Historie → ca. {per_year:.1f} pro Jahr, davon {len(recent)} in den letzten 30 Tagen"
+                         + (f"; zuletzt {hits[-1]:%Y-%m-%d %H:%M}" if hits else ""))
+                try:
+                    checks = strat.explain(df, extra)
+                    miss = [t for okk, t in checks if not okk]
+                    L.append(f"      Jetzt: {'SIGNAL' if strat.entry(df, extra) else 'kein Signal'}" + (f", es fehlt: {miss[0]}" + (f" (+{len(miss) - 1} weitere)" if len(miss) > 1 else "") if miss else ""))
+                except Exception:
+                    pass
+        L.append("")
+        L.append(f"3. ERWARTUNG: Über alle Märkte dieser Profile ca. {total_year:.0f} Signale pro Jahr ≈ {total_year / 12:.1f} pro Monat ≈ {total_year / 52:.1f} pro Woche "
+                 f"(begrenzt durch Positionslimit und Tageslimit).")
+        if total_year < 12:
+            L.append("   → Das ist wenig: Mehrere Tage ohne Trade sind NORMAL. Mehr Märkte oder weitere Strategien (siehe survey.profil_erzeugen) erhöhen die Zahl.")
+        L.append("   Bot-Funktion testen, ohne auf ein Signal zu warten: Telegram 🟢 Kaufen oder Portal → Kaufen (Demo-Konto, mit Stop und Ziel).")
+        return "\n".join(L)
 
     def heartbeat(self) -> None:
         acc = self.mt5.account_info()
