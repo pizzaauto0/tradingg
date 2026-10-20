@@ -21,6 +21,11 @@ const SECTIONS = [
     ["risk.atrStopMult", "Stop-Loss (x ATR)", "number"],
     ["risk.takeProfitRr", "Take-Profit (Vielfaches des Risikos)", "number"],
   ]],
+  ["Sicherheit: Notbremse und Verlustserie", [
+    ["safety.maxDrawdownPct", "Notbremse: max. Verlust vom Höchststand (%, 0 = aus)", "number", "Fällt das Eigenkapital (alle Bots) um so viel unter seinen Höchststand, werden ALLE Positionen geschlossen und alle Bots gestoppt. Gilt für alle drei Bots gemeinsam. Neustart per „Bot starten“ setzt den Höchststand zurück."],
+    ["safety.maxLossStreak", "Verluste in Folge bis zur Pause (0 = aus)", "number", "So viele verlorene Trades hintereinander pausieren die Käufe dieses Bots (bestehende Positionen laufen weiter)."],
+    ["safety.pauseHours", "Pause nach Verlustserie (Stunden)", "number"],
+  ]],
   ["KI-Trailing: Stop-Loss und Take-Profit nachziehen", [
     ["trail.enabled", "Aktiv", "bool", "Zieht den Stop-Loss nach oben, sobald eine Position im Plus ist – nie nach unten. Regelbasiert (kein Sprachmodell), jede Anpassung wird mit Grund gemeldet. Pro Position im Dashboard abschaltbar."],
     ["trail.startUsd", "Start ab Gewinn (USD)", "number", "Ab diesem Gewinn (vor Gebühren) wird gesichert – Beispiel 40: bei +40 liegt der Stop bei +30."],
@@ -65,6 +70,8 @@ const SECTIONS = [
     ["discord.webhook", "Webhook-URL", "password", "Discord: Servereinstellungen → Integrationen → Webhooks → URL kopieren. Wird im App-Speicher abgelegt; wer die URL kennt, kann in den Kanal schreiben – nie weitergeben."],    ["discord.logEnabled", "Log-Kanal aktiv", "bool", "Zweiter Webhook NUR für Protokolle – getrennt von den Handelsmeldungen (z. B. eigener Kanal #logs)."],
     ["discord.logWebhook", "Log-Webhook-URL", "password", "Eigener Webhook für den Log-Kanal. Dorthin kommen gebündelt: jede Kerzen-Entscheidung („warum kein Kauf“), Handel, Stop-Anpassungen, Warnungen, Fehler und Aktionen aus der App (ohne Geheimnisse)."],
     ["discord.logLevel", "Log-Umfang", ["all", "important"], "all = alles inkl. jeder geprüften Kerze (viel Text). important = nur Handel, Warnungen, Fehler."],
+    ["discord.dailyReport", "Tagesbericht jeden Abend", "bool", "Einmal pro Tag (Ortszeit ab der Stunde unten): Profit heute/7 Tage/gesamt, Käufe und Verkäufe, bester/schlechtester Trade, offene Positionen, Drawdown."],
+    ["discord.dailyHour", "Tagesbericht ab Uhr (0–23)", "number"],
     ["discord.liveMessage", "Live-Nachricht im Kanal", "bool", "Eine Nachricht (per Webhook), die sich jede Minute mit der aktuellen Statistik aktualisiert – am besten anpinnen. Sichtbar auf jedem Gerät."],
     ["discord.botToken", "Bot-Token (für die Knöpfe)", "password", "Knöpfe gehen nur mit einem eigenen Discord-Bot (Webhooks können keine): discord.com/developers/applications → New Application → Bot → Token kopieren → unter OAuth2/URL-Generator „bot“ mit Recht „Nachrichten senden“ wählen und den Bot auf deinen Server einladen. Der Token bleibt auf diesem PC."],
     ["discord.channelId", "Kanal-ID (für die Knöpfe)", "text", "In Discord: Einstellungen → Erweitert → Entwicklermodus an; dann Kanal rechtsklicken → „Kanal-ID kopieren“."],

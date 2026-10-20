@@ -130,6 +130,7 @@ function setupIpc() {
   ipcMain.on("rt:reply", (_e, id, resp) => { const fn = pending.get(id); if (fn) { pending.delete(id); fn(resp); } });
   ipcMain.on("notify", (_e, o) => { if (Notification.isSupported()) new Notification({ title: String(o.title || "Trading-Bot"), body: String(o.message || "") }).show(); });
   ipcMain.on("badge", (_e, { text }) => { tray?.setToolTip(`Trading-Bot${text ? " – " + text : ""}`); windows.main?.setTitle(`Trading-Bot${text ? " [" + text + "]" : ""}`); });
+  ipcMain.on("tip", (_e, text) => { tray?.setToolTip(text); });   // Tooltip des Infobereich-Symbols: Gewinn auf einen Blick
   ipcMain.on("open", (_e, name, query) => openPage(String(name), { query: String(query || "") }));
 }
 

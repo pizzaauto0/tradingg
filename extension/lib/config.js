@@ -61,6 +61,9 @@ export const DEFAULTS = {
   },
   // KI-Trailing (lib/trail.js): zieht Stop-Loss (und bei starkem Trend das Ziel) nach, sobald die Position im Plus ist. startUsd: Gewinn in USD, ab dem gesichert wird;
   // startR: oder Vielfaches des ursprünglichen Risikos; lockFraction: Anteil des aktuellen Gewinns, den der Stop sichert (0,75: bei +40 Stop bei +30).
+  // Sicherheit: maxDrawdownPct = Notbremse (0 = aus): fällt das Eigenkapital (alle Bots) um so viel unter seinen Höchststand, werden ALLE Positionen geschlossen und alle Bots gestoppt.
+  // maxLossStreak = so viele Verluste in Folge pausieren die Käufe dieses Bots für pauseHours Stunden (0 = aus).
+  safety: { maxDrawdownPct: 15, maxLossStreak: 4, pauseHours: 6 },
   trail: { enabled: true, startUsd: 40, startR: 1.0, lockFraction: 0.75, extendTp: true },
   costs: { feePct: 0.26, slippagePct: 0.20 }, // je Order (Kauf UND Verkauf); bewusst hoch angesetzt – lieber zu viele Kosten als zu wenige
   backtest: {
@@ -81,7 +84,8 @@ export const DEFAULTS = {
   // Discord: webhook = Meldungen (Kauf/Verkauf mit Stop, Ziel, Begründung; Stundenbericht). botToken + channelId = Knöpfe für die Live-Statistik
   // (Klicks gehen von überall, der Bot verbindet sich nur ausgehend). liveMessage = eine Nachricht im Kanal, die sich jede Minute selbst aktualisiert.
   discord: { enabled: false, webhook: "", botToken: "", channelId: "", liveMessage: false,
-    logEnabled: false, logWebhook: "", logLevel: "all" }, // zweiter Webhook NUR für Protokolle (alle Entscheidungen, Fehler, Ereignisse); logLevel: all | important (Handel, Warnungen, Fehler)
+    logEnabled: false, logWebhook: "", logLevel: "all",
+    dailyReport: true, dailyHour: 22 }, // dailyReport: jeden Abend (ab dailyHour Uhr Ortszeit) ein Tagesbericht per Webhook // zweiter Webhook NUR für Protokolle (alle Entscheidungen, Fehler, Ereignisse); logLevel: all | important (Handel, Warnungen, Fehler)
 };
 
 // Mindestkosten je Order (Gebühr/Spread + Rutschen, in %) – weit über den echten Kosten, damit Backtest und Paper-Handel eher zu pessimistisch sind.
@@ -138,6 +142,10 @@ export function validateConfig(c) {
   if (!(r.maxPositionPct > 0 && r.maxPositionPct <= 100)) fail("Max. Positionsgröße muss in (0, 100] % liegen.");
   if (!(r.atrPeriod >= 2 && r.atrStopMult > 0 && r.takeProfitRr > 0)) fail("ATR-/Stop-Parameter ungültig.");
   if (c.costs.feePct < 0 || c.costs.slippagePct < 0) fail("Kosten dürfen nicht negativ sein.");
+  if (!(c.safety.maxDrawdownPct >= 0 && c.safety.maxDrawdownPct <= 90)) fail("Notbremse: Drawdown muss zwischen 0 (aus) und 90 % liegen.");
+  if (!(Number.isInteger(c.safety.maxLossStreak) && c.safety.maxLossStreak >= 0 && c.safety.maxLossStreak <= 20)) fail("Verlustserie: ganze Zahl 0 (aus) bis 20.");
+  if (!(c.safety.pauseHours >= 0.5 && c.safety.pauseHours <= 72)) fail("Pause nach Verlustserie: 0,5 bis 72 Stunden.");
+  if (!(Number.isInteger(c.discord.dailyHour) && c.discord.dailyHour >= 0 && c.discord.dailyHour <= 23)) fail("Tagesbericht-Stunde: ganze Zahl 0 bis 23.");
   if (!(c.trail.startUsd > 0 && c.trail.startR > 0)) fail("Trailing: Startgewinn (USD) und Start (R) müssen größer 0 sein.");
   if (!(c.trail.lockFraction >= 0.3 && c.trail.lockFraction <= 0.95)) fail("Trailing: gesicherter Gewinnanteil muss zwischen 0,3 und 0,95 liegen.");
   if (c.discord.channelId && !/^\d{5,25}$/.test(c.discord.channelId)) fail("Discord-Kanal-ID ungültig (nur Ziffern; Kanal rechtsklicken → „Kanal-ID kopieren“, Entwicklermodus nötig).");

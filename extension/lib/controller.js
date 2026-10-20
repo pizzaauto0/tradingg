@@ -13,7 +13,7 @@ import { HELP, formatStatus, pollCommands } from "./telegram.js";
 import { decorate, flushLogs, queueLog, sendDiscord } from "./discord.js";
 import { DiscordBot, postPanel } from "./discordbot.js";
 import { buildStatsEmbed } from "./stats.js";
-import { appendEquity, byBot, periodStats, sampleCurve } from "./profit.js";
+import { appendEquity, byBot, byStrategy, performance, periodStats, realized, sampleCurve, tradesToCsv } from "./profit.js";
 
 let current = null; // laufender Durchlauf (Promise) – es läuft nie mehr als einer gleichzeitig
 export async function whenIdle() { while (current) await current; }
@@ -24,7 +24,7 @@ export async function whenIdle() { while (current) await current; }
 // so bleiben vorhandene Daten und der Betrieb der Erweiterung unverändert. Live-Handel (Solana-Wallet) gibt es nur für Krypto.
 const isDefault = (botId) => botId === DEFAULT_BOT;
 const cfgKey = (botId) => (isDefault(botId) ? "config" : `config_${botId}`);
-const SHARED = ["capital", "telegram", "discord", "llm"];
+const SHARED = ["capital", "telegram", "discord", "llm", "safety"];
 const pick = (o, keys) => Object.fromEntries(keys.filter((k) => k in (o || {})).map((k) => [k, o[k]]));
 export const botOf = (msg) => (BOT_IDS.includes(msg?.bot) ? msg.bot : DEFAULT_BOT);
 
@@ -136,6 +136,8 @@ export function runTick(opts = {}) {
 async function tickAll(opts) {
   for (const id of BOT_IDS) await tickOnce(id, opts);
   await recordEquity(opts?.now);
+  await checkBreaker(opts?.fetchFn, opts?.now);
+  await dailyReport(opts?.fetchFn, opts?.now);
   await flushLogs(opts?.fetchFn);
   await updateLiveMessage(opts?.fetchFn).catch((e) => console.warn("Discord-Live-Nachricht:", e.message));
 }
@@ -148,12 +150,51 @@ async function recordEquity(now = new Date()) {
   } catch (e) { console.warn("Eigenkapital-Verlauf:", e.message); }
 }
 
+// Notbremse: fällt das Eigenkapital um maxDrawdownPct unter den Höchststand, werden alle Positionen geschlossen und alle Bots gestoppt.
+async function checkBreaker(fetchFn = fetch, now = new Date()) {
+  const cfg = await loadConfig(), pct = cfg.safety.maxDrawdownPct;
+  if (!(pct > 0) || await getLocal("breaker", null)) return;
+  const a = await getAccount();
+  if (!a.bots.some((b) => b.enabled || b.positions)) return;   // nichts läuft, nichts zu bremsen
+  const peak = Math.max((await getLocal("equityPeak", null)) ?? a.capital, a.equity, a.capital);
+  await setLocal("equityPeak", peak);
+  if (a.equity > peak * (1 - pct / 100)) return;
+  await setLocal("breaker", { ts: now.toISOString(), equity: a.equity, peak, pct });
+  for (const id of BOT_IDS) { const c = await loadConfig(id), st = await loadState(c, id); if (st.enabled || Object.keys(st.positions).length) { st.killRequested = true; await setLocal(stateKey(c, id), st); } }
+  await makeNotifier(cfg, fetchFn)(`NOT-AUS-BREMSE: Eigenkapital ${a.equity.toFixed(2)} USD liegt ${(((peak - a.equity) / peak) * 100).toFixed(1)} % unter dem Höchststand ${peak.toFixed(2)} USD (Grenze ${pct} %). Alle Positionen werden geschlossen, alle Bots gestoppt. Neu starten setzt den Höchststand zurück.`);
+  await tickAll({ fetchFn, now, skipSafety: true });
+}
+
+// Tagesbericht (Discord-Webhook): einmal am Abend ab dailyHour Uhr Ortszeit
+async function dailyReport(fetchFn = fetch, now = new Date()) {
+  const cfg = await loadConfig(), d = cfg.discord;
+  if (!d.enabled || !d.webhook || !d.dailyReport || now.getHours() < d.dailyHour) return;
+  const today = now.toDateString();
+  if ((await getLocal("dailySent", null)) === today) return;
+  await setLocal("dailySent", today);
+  const P = await getProfit(now), t = P.periods, perf = performance((await getLocal("trades", [])), P.curve);
+  const todays = (await getLocal("trades", [])).filter((x) => Date.parse(x.ts) >= t.today.from && (x.action === "ENTRY" || x.action === "EXIT"));
+  const acc = await getAccount(), open = [];
+  for (const id of BOT_IDS) { const c = await loadConfig(id), st = await loadState(c, id); for (const p of Object.values(st.positions)) open.push(`• ${p.symbol} ${(((st.activity?.[p.symbol]?.price ?? p.entryPrice) / p.entryPrice - 1) * 100).toFixed(2)} % | Stop ${p.stop.toFixed(4)} | Ziel ${p.takeProfit.toFixed(4)}`); }
+  const exits = todays.filter((x) => x.action === "EXIT" && x.pnl != null), best = exits.length ? exits.reduce((a, b) => (b.pnl > a.pnl ? b : a)) : null, worst = exits.length ? exits.reduce((a, b) => (b.pnl < a.pnl ? b : a)) : null;
+  const sg = (x) => `${x >= 0 ? "+" : ""}${x.toFixed(2)}`;
+  const lines = [`🌙 **Tagesbericht** ${now.toLocaleDateString("de-DE")} · Eigenkapital ${acc.equity.toFixed(2)} USD`,
+    `**Heute ${sg(t.today.usd)} USD (${sg(t.today.pct)} %)** · realisiert ${sg(t.today.realized)} USD · ${t.today.buys} Käufe, ${t.today.sells} Verkäufe${t.today.sells ? ` (${t.today.wins} Gewinn)` : ""} · Gebühren ${t.today.fees.toFixed(2)} USD`,
+    `7 Tage ${sg(t.week.usd)} USD (${sg(t.week.pct)} %) · insgesamt ${sg(t.total.usd)} USD (${sg(t.total.pct)} %)`];
+  if (best) lines.push(`Bester Trade: ${best.symbol} ${sg(best.pnl)} USD · schlechtester: ${worst.symbol} ${sg(worst.pnl)} USD`);
+  lines.push(open.length ? `Offene Positionen (${open.length}):\n${open.join("\n")}` : "Keine offene Position über Nacht.");
+  if (perf.maxDrawdownPct > 0) lines.push(`Drawdown aktuell ${perf.drawdownPct.toFixed(1)} % (maximal bisher ${perf.maxDrawdownPct.toFixed(1)} %)`);
+  await makeNotifier(cfg, fetchFn).report(lines.join("\n"));
+}
+
 // Kennzahlen Heute / 7 Tage / 30 Tage / Insgesamt; für die Kopfzeile, den Profit-Tab und den Discord-Knopf
 export async function getProfit(now = new Date()) {
   const acc = await getAccount(), nowMs = now.getTime();
   const log = appendEquity(await getLocal("equityLog", []), nowMs, acc.equity, 0);   // aktueller Stand zählt immer mit (wird nicht gespeichert)
   const trades = await getLocal("trades", []);
-  return { equity: acc.equity, capital: acc.capital, cash: acc.cash, periods: periodStats({ log, trades, now: nowMs, capital: acc.capital, equity: acc.equity }),
+  const allTrades = await getLocal("trades", []);
+  return { perf: performance(allTrades, log), strategies: byStrategy(allTrades).slice(0, 12), breaker: await getLocal("breaker", null),
+    equity: acc.equity, capital: acc.capital, cash: acc.cash, periods: periodStats({ log, trades, now: nowMs, capital: acc.capital, equity: acc.equity }),
     bots: byBot(trades, nowMs, BOT_IDS), labels: Object.fromEntries(BOT_IDS.map((id) => [id, BOTS[id].label])), curve: sampleCurve(log, 300), now: now.toISOString() };
 }
 
@@ -356,6 +397,8 @@ async function handleInner(msg, fetchFn = fetch) {
     case "getStatus": return getStatus(botId);
     case "getAccount": return { ...(await getAccount()), today: (await getProfit()).periods.today };
     case "getProfit": return getProfit();
+    case "exportTrades": return { csv: tradesToCsv((await getLocal("trades", [])).slice(-1000)), count: Math.min(1000, (await getLocal("trades", [])).length) };
+    case "clearBreaker": { await setLocal("breaker", null); await setLocal("equityPeak", (await getAccount()).equity); return true; }
     case "saveConfig": { const r = await saveConfig(msg.patch, botId); await syncDiscord(fetchFn).catch(() => {}); return r; }
     case "getLiveStats": return getLiveStats();
     case "discordStatus": return discordBotStatus();
@@ -387,12 +430,14 @@ async function handleInner(msg, fetchFn = fetch) {
     case "resetAccount": { // Paper-Konto auf das Startkapital zurücksetzen (nur ohne offene Positionen)
       for (const id of BOT_IDS) { const c = await loadConfig(id); if (Object.keys((await loadState(c, id)).positions).length) throw new Error("Zurücksetzen nur ohne offene Positionen."); }
       await saveAccount({ cash: cfg.capital.start, values: {} });
+      await setLocal("equityPeak", cfg.capital.start); await setLocal("breaker", null); await setLocal("equityLog", []);
       return true;
     }
     case "start": {
       if (cfg.liveTrading && !(await getUnlockedKey())) throw new Error("Wallet zuerst entsperren.");
       const st = await loadState(cfg, botId);
       if (st.killRequested) throw new Error("Not-Aus ist noch aktiv – Position erst schließen/prüfen.");
+      if (await getLocal("breaker", null)) { await setLocal("breaker", null); await setLocal("equityPeak", (await getAccount()).equity); }   // bewusster Neustart nach der Notbremse: neuer Höchststand
       st.enabled = true;
       await setLocal(stateKey(cfg, botId), st);
       runTick({ fetchFn }); // im Hintergrund, blockiert das Popup nicht

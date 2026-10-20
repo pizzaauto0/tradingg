@@ -31,6 +31,15 @@ rechnet das Spielgeld 1:1 (Näherung). Yahoo-Daten: Innertageskerzen reichen nur
 - Der Verlauf wird alle 5 Minuten gespeichert; beginnt er später als der Zeitraum, steht „Verlauf beginnt später“ (Basis ist dann der erste bekannte Stand).
 - **Chart zoomen (Dashboard):** Mausrad (an der Mausposition), Knöpfe ＋ / － / ↺, Ziehen mit gedrückter Maustaste verschiebt, Doppelklick setzt zurück. Es werden bis zu 600 Kerzen geladen (soweit die Datenquelle sie liefert).
 
+## Weitere Funktionen
+- **Notbremse (Drawdown):** Fällt das Eigenkapital (alle Bots) um mehr als *x %* unter seinen Höchststand (Standard 15 %, ⚙ „Sicherheit“, 0 = aus), werden **alle Positionen geschlossen und alle Bots gestoppt**; Meldung per Discord/Telegram, Banner im Profit-Tab. „Bot starten“ hebt sie bewusst auf und setzt den Höchststand neu.
+- **Verlustserien-Pause:** Nach *N* verlorenen Trades in Folge (Standard 4) kauft dieser Bot *X* Stunden (Standard 6) nicht mehr – offene Positionen laufen weiter. Im Stundenbericht steht dann der Grund.
+- **Kennzahlen im Profit-Tab:** Trefferquote, Profitfaktor, Erwartungswert je Trade, Ø Gewinn/Verlust, Gewinn-Verlust-Verhältnis, Serien, bester/schlechtester Tag, aktueller und maximaler Drawdown, Höchststand.
+- **Strategie-Rangliste:** welche Strategie (inkl. „Manuell“) wirklich verdient – aus den echten abgeschlossenen Trades, netto nach Gebühren.
+- **CSV-Export:** „⬇ Trades als CSV“ speichert alle Trades für Excel (Semikolon, Komma-Dezimalzahlen).
+- **Discord-Tagesbericht:** jeden Abend (ab Uhrzeit einstellbar) Profit heute/7 Tage/gesamt, Käufe/Verkäufe, bester/schlechtester Trade, offene Positionen, Drawdown.
+- **Symbol im Infobereich:** Tooltip zeigt Gewinn heute und gesamt.
+
 ## Gebühren (bewusst zu hoch)
 Backtest und Paper-Handel rechnen bei **jedem Kauf und jedem Verkauf** Gebühr/Spread plus Rutschen ab. Untergrenzen je Order:
 Krypto 0,26 % + 0,20 %, Währungen 0,03 % + 0,03 %, Metalle 0,06 % + 0,06 % – deutlich mehr als echte Broker verlangen. Niedriger eingestellte Werte

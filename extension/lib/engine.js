@@ -114,6 +114,7 @@ export class Engine {
     if (!a.signal) return `kein Einstiegssignal der Strategie ${a.strategy.split("(")[0]}`;
     const [ok, why] = this.risk.canOpen(Object.keys(state.positions).length);
     if (this.risk.halted) return "Signal vorhanden, aber Tageslimit erreicht – kein Handel";
+    if (this.isPaused(new Date())) return `Signal vorhanden, aber Kaufpause nach Verlustserie bis ${new Date(state.pauseUntil).toLocaleTimeString("de-DE")}`;
     if (!ok) return `Signal vorhanden, aber ${why}`;
     return "Signal vorhanden – Einstieg wird bei der nächsten geschlossenen Kerze ausgeführt oder wegen Positionsgröße/Guthaben abgelehnt";
   }
@@ -293,10 +294,24 @@ export class Engine {
       amount: fill.amount, fee: fill.fee, pnl, strategy: pos.strategyName, regime: pos.regime, reason, equity: await this.equity() });
     const h = (this.state.hourly ||= { entries: 0, exits: 0, pnl: 0 });
     h.exits++; h.pnl += pnl;
+    await this.trackStreak(pnl, now);
     const held = (Date.parse(now.toISOString()) - Date.parse(pos.openedAt)) / 3.6e6, costs = pos.entryFee + fill.fee;
     await this.notify(`EXIT ${pos.symbol} @ ${fmtPx(fill.price)} (Einstieg ${fmtPx(pos.entryPrice)}) | PnL ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} USD netto nach Gebühren ${costs.toFixed(2)} USD` +
       ` | Stop war ${fmtPx(pos.stop)}, Ziel ${fmtPx(pos.takeProfit)} | gehalten ${held < 48 ? held.toFixed(1) + " h" : (held / 24).toFixed(1) + " Tage"}\nWarum verkauft: ${reason}`);
   }
+
+  // Verlustserie: nach maxLossStreak Verlusten in Folge keine neuen Käufe dieses Bots für pauseHours (Abkühlphase); ein Gewinn setzt die Serie zurück
+  async trackStreak(pnl, now) {
+    const sf = this.cfg.safety, st = this.state;
+    st.lossStreak = pnl > 0 ? 0 : (st.lossStreak || 0) + 1;
+    if (sf?.maxLossStreak > 0 && st.lossStreak >= sf.maxLossStreak) {
+      st.pauseUntil = new Date(now.getTime() + sf.pauseHours * 3.6e6).toISOString();
+      st.lossStreak = 0;
+      await this.notify(`WARNUNG: ${sf.maxLossStreak} Verluste in Folge – dieser Bot kauft nicht mehr bis ${new Date(st.pauseUntil).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })} (Abkühlphase ${sf.pauseHours} h). Bestehende Positionen laufen weiter.`);
+    }
+  }
+
+  isPaused(now) { return !!this.state.pauseUntil && now.getTime() < Date.parse(this.state.pauseUntil); }
 
   async flatten(reason, now) {
     for (const pos of Object.values(this.state.positions)) {
@@ -365,6 +380,7 @@ export class Engine {
   // ---- Einstiege ----
   async lookForEntry(sym, { closed, live, isNew }, now, obs) {
     if (this.state.positions[sym] || this.exitedThisTick.has(sym) || !isNew) return;
+    if (this.isPaused(now)) { this.log("info", `${sym}: Kaufpause nach Verlustserie bis ${new Date(this.state.pauseUntil).toLocaleTimeString("de-DE")} – kein Einstieg`); return; }
     const [ok, why] = this.risk.canOpen(Object.keys(this.state.positions).length);
     if (!ok) { console.info("Kein Einstieg:", why); this.log("info", `${sym}: Signal geprüft, aber kein Einstieg: ${why}`); return; }
     const { market, sel, signal } = obs;

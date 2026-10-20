@@ -58,8 +58,33 @@ async function renderProfit() {
   const rows = [["Bot", "Heute", "7 Tage", "Gesamt", "Trades"]];
   for (const [id, label] of BOTS) { const b = pdata.bots[id]; rows.push([label, sg(b.today.realized), sg(b.week.realized), sg(b.total.realized), `${b.total.buys} / ${b.total.sells}`]); }
   $("pbots").replaceChildren(...rows.map((r, i) => { const tr = document.createElement("tr"); r.forEach((x, j) => { const td = document.createElement(i ? "td" : "th"); td.textContent = x; if (i && j >= 1 && j <= 3) td.className = Number(x) >= 0 ? "ok" : "bad"; tr.append(td); }); return tr; }));
+  const P = pdata.perf, f2 = (x, d = 2) => (x == null || !Number.isFinite(x) ? "–" : x.toFixed(d));
+  $("pbreaker").hidden = !pdata.breaker;
+  if (pdata.breaker) $("pbreaker").textContent = `🛑 NOT-AUS-BREMSE ausgelöst am ${new Date(pdata.breaker.ts).toLocaleString("de-DE")}: Eigenkapital ${pdata.breaker.equity.toFixed(2)} USD lag ${pdata.breaker.pct} % unter dem Höchststand ${pdata.breaker.peak.toFixed(2)} USD. Alle Positionen wurden geschlossen, alle Bots gestoppt. „Alle starten“ (oder „Bot starten“) hebt die Bremse auf und setzt den Höchststand neu.`;
+  const cells = [["Abgeschlossene Trades", P.trades], ["Trefferquote", P.winRate == null ? "–" : `${P.winRate.toFixed(0)} % (${P.wins}/${P.trades})`], ["Profitfaktor", P.profitFactor === Infinity ? "∞" : f2(P.profitFactor)],
+    ["Erwartungswert je Trade", P.expectancy == null ? "–" : `${sg(P.expectancy)} USD`], ["Ø Gewinn / Ø Verlust", `${f2(P.avgWin)} / ${f2(P.avgLoss)} USD`], ["Gewinn-Verlust-Verhältnis", f2(P.payoff)],
+    ["Bester / schlechtester Trade", `${f2(P.best)} / ${f2(P.worst)} USD`], ["Aktuelle Serie", P.streak > 0 ? `${P.streak} Gewinne in Folge` : P.streak < 0 ? `${-P.streak} Verluste in Folge` : "–"],
+    ["Längste Gewinn- / Verlustserie", `${P.maxWinStreak} / ${P.maxLossStreak}`], ["Bester Tag", P.bestDay ? `${sg(P.bestDay[1])} USD (${P.bestDay[0]})` : "–"], ["Schlechtester Tag", P.worstDay ? `${sg(P.worstDay[1])} USD (${P.worstDay[0]})` : "–"],
+    ["Drawdown jetzt (vom Höchststand)", `${f2(P.drawdown)} USD (${f2(P.drawdownPct, 1)} %)`], ["Max. Drawdown bisher", `${f2(P.maxDrawdown)} USD (${f2(P.maxDrawdownPct, 1)} %)`], ["Höchststand Eigenkapital", P.peak == null ? "–" : `${f2(P.peak)} USD`]];
+  $("pperf").replaceChildren(...cells.map(([k, v]) => { const d = document.createElement("div"), s = document.createElement("small"), b = document.createElement("strong"); s.textContent = k; b.textContent = v; d.append(s, b); return d; }));
+  const srows = [["Strategie", "Trades", "Trefferquote", "Ø je Trade", "Ergebnis"]];
+  for (const r of pdata.strategies) srows.push([r.name, r.trades, `${r.winRate.toFixed(0)} %`, sg(r.avg), sg(r.pnl)]);
+  if (srows.length === 1) srows.push(["noch keine abgeschlossenen Trades", "", "", "", ""]);
+  $("pstrat").replaceChildren(...srows.map((r, i) => { const tr = document.createElement("tr"); r.forEach((x, j) => { const td = document.createElement(i ? "td" : "th"); td.textContent = x; if (i && j >= 3 && x !== "") td.className = Number(x) >= 0 ? "ok" : "bad"; tr.append(td); }); return tr; }));
+  tip(`Trading-Bot · heute ${sg(pdata.periods.today.usd)} USD · gesamt ${sg(pdata.periods.total.usd)} USD`);
   drawCurve();
 }
+$("pcsv").onclick = async () => {
+  try {
+    const r = await call("exportTrades");
+    if (!r.count) return alert("Noch keine Trades zum Exportieren.");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([r.csv], { type: "text/csv;charset=utf-8" }));
+    a.download = `trades_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.append(a); a.click(); a.remove();
+  } catch (e) { alert(e.message); }
+};
+const tip = (text) => { try { window.electronBridge?.tip(text); } catch { /* Tooltip ist nur Zugabe */ } };   // Symbol im Infobereich zeigt den Gewinn
 function drawCurve() {
   const cv = $("pcurve"), dpr = devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
   if (!pdata || !W) return;
@@ -94,6 +119,7 @@ async function refresh() {
     $("pnl").className = a.pnl >= 0 ? "ok" : "bad";
     $("cash").textContent = money(a.cash);
     if (a.today) {
+      tip(`Trading-Bot · heute ${sg(a.today.usd)} USD (${sg(a.today.pct)} %) · gesamt ${sg(a.pnl)} USD`);
       $("today").textContent = `${sg(a.today.usd)} USD`; $("today").className = a.today.usd >= 0 ? "ok" : "bad";
       $("todayPct").textContent = `(${sg(a.today.pct)} %)`; $("todayPct").className = a.today.usd >= 0 ? "ok" : "bad";
     }
