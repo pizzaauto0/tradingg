@@ -24,6 +24,15 @@ gibt es die MetaTrader-App in `../mt5bot`). Nur Kauf (Long), **ohne Hebel**: bei
 Positionsgröße (33 % des Kapitals) das Risiko meist weit unter 1 % – Gewinne und Verluste bleiben klein. USD/EUR ist der Kehrwert von EUR/USD und
 rechnet das Spielgeld 1:1 (Näherung). Yahoo-Daten: Innertageskerzen reichen nur ~60 Tage (5/15/30 Min.) bzw. ~2 Jahre (1 Std.) zurück.
 
+## Mehrere Modi gleichzeitig (Vergleich)
+Pro Bot (Währungen, Silber & Gold, Krypto) gibt es 5 Modi: **Streng, Erkunden, Playbook, Trefferquote, Final-3**. Der **Haupt-Modus (★, einstellbar im Tab „Strategien“)** handelt wie bisher mit dem gemeinsamen Paper-Konto.
+Die **anderen vier laufen als Schatten-Läufe im Hintergrund** mit **eigenem Paper-Geld** (gleiches Startkapital, gleiche Märkte, Gebühren und Regeln – nur die Strategie-Auswahl unterscheidet sich; Final-3 rechnet auf Tageskerzen). Sie melden nichts an Discord/Telegram.
+- **Ansehen:** in jedem Bot-Tab oben die Modus-Leiste – ein Klick auf einen Modus zeigt dessen Konto, Gewinn, Trades, Kennzahlen, offene Positionen, Entscheidungen und Verlauf. Der Tab **📊 Vergleich** stellt alle 15 Läufe nebeneinander (der Beste je Bot ist grün); ein Klick auf eine Zeile öffnet den Modus.
+- **Log-Dateien:** je Modus jede Stunde `stunde_<Datum>_<Std>h.txt` und alle 6 Stunden `6h_<Datum>_<Std>h.txt` (Konto, Gewinn, Kennzahlen, Positionen, Käufe/Verkäufe mit Begründung, Entscheidungen, Fehler) in `%APPDATA%\Trading-Bot\logs\<Bot>\<Modus>\` – Knopf „📂 Log-Ordner öffnen“. Dateien älter als 30 Tage werden beim Start gelöscht.
+- **Einstellungen:** ⚙ → „Vergleichs-Modi“ (an/aus, je Modus). Schatten-Läufe zurücksetzen: Tab Vergleich.
+- Rechenlast: höchstens zwei Strategie-Neuprüfungen (Backtests) pro Durchlauf – die ersten Schatten-Läufe starten deshalb nach und nach (nach ca. 3–6 Minuten laufen alle). Kursdaten und Historie werden zwischen den Modi geteilt.
+- Fairer Vergleich: Gewinn = realisiert (netto nach Gebühren) + offen. Der Haupt-Modus teilt sich sein Konto mit den anderen Bots; ein Schatten hat sein eigenes – bei vielen Bots/Positionen sind die Zahlen deshalb nur grob vergleichbar. Nur Paper, keine Anlageberatung.
+
 ## Profit
 - **Kopfzeile:** links der Gesamtgewinn (Eigenkapital, +USD und +% seit Start), daneben **Profit heute** (seit Mitternacht, Ortszeit).
 - **Tab „💰 Profit“:** Karten für Heute, Letzte Woche (7 Tage), Letzte 30 Tage und Insgesamt (Eigenkapitaländerung inkl. offener Positionen, realisierter Gewinn, Käufe/Verkäufe, Trefferquote, Gebühren), Eigenkapital-Verlauf als Kurve (1 Tag / 7 Tage / 30 Tage / Alles) und realisierter Gewinn je Bot.

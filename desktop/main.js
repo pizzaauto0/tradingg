@@ -51,6 +51,13 @@ function installDiscordHeaders() {
   });
 }
 
+// Log-Dateien älter als 30 Tage werden beim Start gelöscht (sonst wächst der Ordner endlos)
+function pruneLogs() {
+  const root = path.join(app.getPath("userData"), "logs"), limit = Date.now() - 30 * 86400000;
+  const walk = (d) => { try { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (fs.statSync(p).mtimeMs < limit) fs.unlinkSync(p); } } catch { /* Ordner fehlt */ } };
+  walk(root);
+}
+
 function serve(request) {
   const u = new URL(request.url);
   const rel = decodeURIComponent(u.pathname).replace(/^\/+/, "");
@@ -130,6 +137,18 @@ function setupIpc() {
   ipcMain.on("rt:reply", (_e, id, resp) => { const fn = pending.get(id); if (fn) { pending.delete(id); fn(resp); } });
   ipcMain.on("notify", (_e, o) => { if (Notification.isSupported()) new Notification({ title: String(o.title || "Trading-Bot"), body: String(o.message || "") }).show(); });
   ipcMain.on("badge", (_e, { text }) => { tray?.setToolTip(`Trading-Bot${text ? " – " + text : ""}`); windows.main?.setTitle(`Trading-Bot${text ? " [" + text + "]" : ""}`); });
+  // Log-Dateien der Modi (Stunden- und 6-Stunden-Berichte): nur unterhalb von <Datenordner>/logs, nur harmlose Dateinamen
+  const logDir = () => path.join(app.getPath("userData"), "logs");
+  ipcMain.handle("log:write", (_e, rel, text) => {
+    rel = String(rel);
+    if (!/^[\w\-./]{1,160}$/.test(rel) || rel.includes("..") || rel.startsWith("/")) throw new Error("Ungültiger Logname");
+    const f = path.join(logDir(), rel);
+    if (!f.startsWith(logDir() + path.sep)) throw new Error("Ungültiger Logpfad");
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(f, String(text).slice(0, 300000));
+    return true;
+  });
+  ipcMain.handle("log:open", () => { fs.mkdirSync(logDir(), { recursive: true }); return shell.openPath(logDir()); });
   ipcMain.on("tip", (_e, text) => { tray?.setToolTip(text); });   // Tooltip des Infobereich-Symbols: Gewinn auf einen Blick
   ipcMain.on("open", (_e, name, query) => openPage(String(name), { query: String(query || "") }));
 }
@@ -158,6 +177,7 @@ else {
     store = new Store(path.join(app.getPath("userData"), "storage.json"));
     protocol.handle("app", serve);
     installDiscordHeaders();
+    pruneLogs();
     Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: "editMenu" }, { role: "viewMenu" }]));
     setupIpc();
     startBackground();

@@ -24,6 +24,8 @@
   };
   addEventListener("error", (e) => showError(`Fehler: ${e.message} (${String(e.filename).split("/").pop()}:${e.lineno})`));
   addEventListener("unhandledrejection", (e) => showError(`Fehler: ${e.reason?.message || e.reason}`));
+  window.__DESKTOP = true;   // die Erweiterungslogik weiß damit, dass sie in der Desktop-App läuft (Vergleichs-Modi, Log-Dateien)
+  window.desktopLog = (rel, text) => B.writeLog(rel, text);
   const listeners = [];
   let messageHooked = false;
   const alarms = new Map(), alarmListeners = [];

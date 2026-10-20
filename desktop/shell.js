@@ -1,7 +1,11 @@
 // Rahmen der Desktop-App: gemeinsames Paper-Konto oben, darunter ein Tab je Bot (Währungen, Silber & Gold, Krypto).
 // Jeder Tab ist die unveränderte Popup-Seite der Erweiterung mit ?bot=<id>.
 const BOTS = [["fx", "Währungen"], ["metals", "Silber & Gold"], ["crypto", "Krypto"]];
-const TABS = [...BOTS, ["profit", "💰 Profit"]];
+const TABS = [...BOTS, ["profit", "💰 Profit"], ["compare", "📊 Vergleich"]];
+const MODES = [["strict", "Streng"], ["explore", "Erkunden"], ["playbook", "Playbook"], ["winrate", "Trefferquote"], ["final", "Final-3"]];
+let modes = null;                 // Antwort von getModes (Vergleichstabelle), alle paar Sekunden aktualisiert
+const subMode = {};               // gewählter Modus je Bot (Standard: der Haupt-Modus)
+const mainOf = (bot) => modes?.rows.find((r) => r.bot === bot && r.main)?.mode ?? "strict";
 const $ = (id) => document.getElementById(id);
 const call = async (type, extra = {}) => { const r = await chrome.runtime.sendMessage({ type, ...extra }); if (!r?.ok) throw new Error(r?.error || "Keine Antwort vom Hintergrunddienst"); return r.result; };
 const money = (x) => (x == null ? "–" : Number(x).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " USD");
@@ -14,8 +18,11 @@ function select(id) {
   try { localStorage.setItem("botTab", id); } catch { /* egal */ }
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.bot === id));
   document.querySelectorAll("iframe").forEach((f) => f.classList.toggle("active", f.dataset.bot === id));
-  $("frames").hidden = id === "profit"; $("profit").hidden = id !== "profit";
+  const isBot = BOTS.some(([b]) => b === id), sub = isBot ? (subMode[id] || mainOf(id)) : null, showFrame = isBot && sub === mainOf(id);
+  $("frames").hidden = !showFrame; $("profit").hidden = id !== "profit"; $("compare").hidden = id !== "compare"; $("modeview").hidden = !(isBot && !showFrame); $("subtabs").hidden = !isBot;
   if (id === "profit") renderProfit();
+  if (id === "compare") renderCompare();
+  if (isBot) { renderSubtabs(id); if (!showFrame) renderMode(id, sub); }
 }
 
 for (const [id, label] of BOTS) {
@@ -32,8 +39,88 @@ for (const [id, label] of BOTS) {
 {
   const b = document.createElement("button");
   b.dataset.bot = "profit"; b.id = "tab-profit"; b.textContent = "💰 Profit"; b.onclick = () => select("profit");
-  $("tabs").append(b);
+  const c = document.createElement("button");
+  c.dataset.bot = "compare"; c.id = "tab-compare"; c.textContent = "📊 Vergleich"; c.onclick = () => select("compare");
+  $("tabs").append(b, c);
 }
+
+// ---- Modi: Unter-Tabs je Bot, Detailansicht eines Schatten-Modus, Vergleichstabelle ----
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+const sgn = (x, d = 2) => (x == null || !Number.isFinite(x) ? "–" : `${x >= 0 ? "+" : ""}${x.toFixed(d)}`);
+async function loadModes() { try { modes = await call("getModes"); } catch { /* Hintergrund noch nicht bereit */ } }
+function renderSubtabs(bot) {
+  const bar = $("subtabs"), main = mainOf(bot), cur = subMode[bot] || main;
+  bar.replaceChildren(...MODES.map(([m, label]) => {
+    const row = modes?.rows.find((r) => r.bot === bot && r.mode === m), b = el("button", `${m === cur ? "active" : ""} ${row?.off ? "off" : ""}`, `${m === main ? "★ " : ""}${label}${row && !row.off && !row.main ? ` ${sgn(row.profit, 1)}` : ""}`);
+    b.title = m === main ? "Haupt-Modus: handelt mit dem gemeinsamen Paper-Konto (Einstellung im Tab „Strategien“)" : row?.off ? "ausgeschaltet (⚙ Einstellungen → Vergleichs-Modi)" : "Schatten-Lauf mit eigenem Paper-Geld – läuft im Hintergrund weiter";
+    b.onclick = () => { subMode[bot] = m; select(bot); };
+    return b;
+  }));
+}
+function kpi(label, value, cls) { const d = el("div"), s = el("small", null, label), b = el("strong", cls || "", value); d.append(s, b); return d; }
+async function renderMode(bot, mode) {
+  const box = $("modeview");
+  let d; try { d = await call("getModeDetail", { bot, mode }); } catch (e) { box.replaceChildren(el("div", "pbox", e.message)); return; }
+  if ((subMode[bot] || mainOf(bot)) !== mode || $("modeview").hidden) return;   // inzwischen anderer Tab
+  const s = d.summary, p = s.perf, parts = [];
+  const head = el("div", "mvhead"), h2 = el("h2", null, `${d.botLabel} · Modus ${d.label}`);
+  head.append(h2, el("span", "tag", d.main ? "Haupt-Modus · gemeinsames Paper-Konto" : "Schatten-Lauf · eigenes Paper-Geld"), el("span", "tag", d.lastTick ? `zuletzt geprüft ${new Date(d.lastTick).toLocaleTimeString("de-DE")}` : "noch nicht gelaufen"));
+  if (d.lastError) head.append(el("div", "bad", `Letzter Fehler: ${d.lastError}`));
+  parts.push(head);
+  const grid = el("div", "perfgrid pbox");
+  grid.append(kpi("Eigenkapital", `${d.equity.toFixed(2)} USD`), kpi("Gewinn gesamt", `${sgn(s.profit)} USD (${sgn(s.pct)} %)`, s.profit >= 0 ? "ok" : "bad"), kpi("realisiert / offen", `${sgn(s.realized)} / ${sgn(s.unrealized)} USD`),
+    kpi("Abgeschlossene Trades", String(p.trades)), kpi("Trefferquote", p.winRate == null ? "–" : `${p.winRate.toFixed(0)} %`), kpi("Profitfaktor", p.profitFactor === Infinity ? "∞" : p.profitFactor == null ? "–" : p.profitFactor.toFixed(2)),
+    kpi("Erwartungswert je Trade", p.expectancy == null ? "–" : `${sgn(p.expectancy)} USD`), kpi("Max. Drawdown", d.main ? "siehe Profit-Tab" : `${p.maxDrawdownPct.toFixed(1)} %`), kpi("Gebühren", `${s.fees.toFixed(2)} USD`), kpi("Strategien", `${d.active.length} aktiv / ${d.approved} zugelassen`));
+  parts.push(grid);
+  if (d.active.length) { const a = el("div", "pbox"); a.append(el("b", null, "Aktive Strategien: "), document.createTextNode(d.active.join(" · "))); parts.push(a); }
+  const pos = el("div", "pbox"); pos.append(el("b", null, `Offene Positionen (${d.positions.length})`));
+  const pt = el("table", "mvtable"); pt.append(...[["Markt", "Menge", "Einstieg", "Jetzt", "Ergebnis", "Stop", "Ziel", "Strategie"], ...d.positions.map((q) => [q.symbol, q.amount.toFixed(5), q.entryPrice, q.price, sgn((q.price - q.entryPrice) * q.amount), q.stop, q.takeProfit, q.strategyName])]
+    .map((r, i) => { const tr = el("tr"); r.forEach((x, j) => { const td = el(i ? "td" : "th", i && j === 4 ? (Number(x) >= 0 ? "ok" : "bad") : "", typeof x === "number" ? (x >= 100 ? x.toFixed(2) : x.toFixed(4)) : x); tr.append(td); }); return tr; }));
+  pos.append(d.positions.length ? pt : el("div", "muted", "keine offene Position")); parts.push(pos);
+  const tr = el("div", "pbox"); tr.append(el("b", null, "Letzte Käufe & Verkäufe"));
+  const tt = el("table", "mvtable"); tt.append(...[["Zeit", "", "Markt", "Preis", "Ergebnis netto", "Strategie"], ...d.trades.slice(0, 15).map((t) => [new Date(t.ts).toLocaleString("de-DE"), t.action === "ENTRY" ? "Kauf" : "Verkauf", t.symbol, t.price, t.pnl == null ? "–" : sgn(t.pnl), t.strategy || ""])]
+    .map((r, i) => { const row = el("tr"); r.forEach((x, j) => { const td = el(i ? "td" : "th", i && j === 4 && x !== "–" ? (Number(x) >= 0 ? "ok" : "bad") : "", typeof x === "number" ? (x >= 100 ? x.toFixed(2) : x.toFixed(4)) : x); row.append(td); }); return row; }));
+  tr.append(d.trades.length ? tt : el("div", "muted", "noch keine Trades")); parts.push(tr);
+  if (!d.main && d.curve.length > 1) { const c = el("div", "pbox"); c.append(el("b", null, "Eigenkapital-Verlauf dieses Modus")); const cv = el("canvas"); cv.id = "mvcurve"; cv.style.cssText = "width:100%;height:180px;display:block"; c.append(cv); parts.push(c); box._curve = d; }
+  if (d.decisions.length) { const dc = el("div", "pbox"); dc.append(el("b", null, "Letzte Entscheidungen")); for (const x of d.decisions) dc.append(el("div", "muted", `${new Date(x.ts).toLocaleTimeString("de-DE")} ${String(x.text).replace(/^.*? · /, "")}`)); parts.push(dc); }
+  const lg = el("div", "pbox"); const b = el("button", "btn", "📂 Log-Ordner öffnen"); b.onclick = () => window.electronBridge?.openLogs(); lg.append(b, el("span", "muted", "  Jede Stunde und alle 6 Stunden wird für diesen Modus eine Datei gespeichert."));
+  parts.push(lg);
+  box.replaceChildren(...parts);
+  if (box._curve) { drawMini($("mvcurve"), box._curve.curve, box._curve.capital); box._curve = null; }
+}
+function drawMini(cv, pts, base) {
+  if (!cv || pts.length < 2) return;
+  const dpr = devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight; cv.width = W * dpr; cv.height = H * dpr;
+  const g = cv.getContext("2d"); g.scale(dpr, dpr);
+  const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim(), vals = pts.map((p) => p[1]).concat(base);
+  let lo = Math.min(...vals), hi = Math.max(...vals); const m = Math.max((hi - lo) * 0.1, 0.5); lo -= m; hi += m;
+  const X = (t) => 8 + ((t - pts[0][0]) / Math.max(1, pts.at(-1)[0] - pts[0][0])) * (W - 16), Y = (v) => 6 + (1 - (v - lo) / (hi - lo)) * (H - 12);
+  g.setLineDash([5, 4]); g.strokeStyle = css("--muted"); g.beginPath(); g.moveTo(8, Y(base)); g.lineTo(W - 8, Y(base)); g.stroke(); g.setLineDash([]);
+  g.strokeStyle = pts.at(-1)[1] >= base ? css("--ok") : css("--bad"); g.lineWidth = 2; g.beginPath(); pts.forEach((p, i) => (i ? g.lineTo(X(p[0]), Y(p[1])) : g.moveTo(X(p[0]), Y(p[1])))); g.stroke();
+}
+async function renderCompare() {
+  await loadModes();
+  if (!modes) return;
+  const head = ["Modus", "Rolle", "Gewinn USD", "Gewinn %", "realisiert", "offen", "Trades", "Treffer", "Profitf.", "Max DD", "Gebühren", "Strategien"];
+  const t = $("cmpTable"), rows = [];
+  rows.push(Object.assign(el("tr"), {}));
+  head.forEach((h) => rows[0].append(el("th", null, h)));
+  for (const [bot, label] of BOTS) {
+    const g = el("tr", "grp"), td = el("td", null, label); td.colSpan = head.length; g.append(td); rows.push(g);
+    const mine = modes.rows.filter((r) => r.bot === bot), best = Math.max(...mine.filter((r) => !r.off).map((r) => r.profit));
+    for (const r of mine) {
+      const tr = el("tr", r.off ? "offrow" : r.profit === best && best > 0 ? "best" : "");
+      const cells = r.off ? [r.label, "aus", "", "", "", "", "", "", "", "", "", ""] : [`${r.main ? "★ " : ""}${r.label}`, r.main ? "Haupt" : "Schatten", sgn(r.profit), sgn(r.pct), sgn(r.realized), sgn(r.unrealized), r.trades, r.winRate == null ? "–" : `${r.winRate.toFixed(0)} %`,
+        r.profitFactor === Infinity ? "∞" : r.profitFactor == null ? "–" : r.profitFactor.toFixed(2), r.main ? "–" : `${r.maxDrawdownPct.toFixed(1)} %`, r.fees.toFixed(2), `${r.active}/${r.approved}`];
+      cells.forEach((x, j) => { const c = el("td", !r.off && (j === 2 || j === 3) ? (Number(x) >= 0 ? "ok" : "bad") : "", String(x)); tr.append(c); });
+      tr.style.cursor = r.off ? "default" : "pointer"; if (!r.off) tr.onclick = () => { subMode[bot] = r.mode; select(bot); };
+      rows.push(tr);
+    }
+  }
+  t.replaceChildren(...rows);
+}
+$("cmpLogs").onclick = () => window.electronBridge?.openLogs();
+$("cmpReset").onclick = async () => { if (!confirm("Alle Schatten-Läufe auf frisches Paper-Geld zurücksetzen? Ihre Trades und Statistiken werden gelöscht (der Haupt-Modus bleibt unberührt).")) return; try { await call("resetShadows"); await renderCompare(); } catch (e) { alert(e.message); } };
 
 // ---- Profit-Tab ----
 const sg = (x, d = 2) => `${x >= 0 ? "+" : ""}${x.toFixed(d)}`;
@@ -155,5 +242,7 @@ $("killAll").onclick = act(async () => {
 });
 
 refresh();
+loadModes().then(() => select(active));
+setInterval(async () => { await loadModes(); if (BOTS.some(([b]) => b === active)) { renderSubtabs(active); const sub = subMode[active] || mainOf(active); if (sub !== mainOf(active)) renderMode(active, sub); } if (active === "compare") renderCompare(); }, 15000);
 setInterval(refresh, 5000);
 setInterval(renderProfit, 15000);

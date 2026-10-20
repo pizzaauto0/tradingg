@@ -21,6 +21,14 @@ const SECTIONS = [
     ["risk.atrStopMult", "Stop-Loss (x ATR)", "number"],
     ["risk.takeProfitRr", "Take-Profit (Vielfaches des Risikos)", "number"],
   ]],
+  ["Vergleichs-Modi (Schatten-Läufe mit eigenem Paper-Geld)", [
+    ["compare.enabled", "Vergleichs-Modi aktiv", "bool", "Neben dem Haupt-Modus (Tab „Strategien“, handelt mit dem gemeinsamen Konto) laufen die übrigen Modi dieses Bots als Schatten mit eigenem Paper-Geld – gleiche Märkte und Regeln, andere Strategie-Auswahl. Ergebnisse: Unter-Tabs und Tab „📊 Vergleich“; jede Stunde und alle 6 Stunden wird je Modus eine Log-Datei gespeichert. Nur in der Desktop-App."],
+    ["compare.strict", "Modus Streng mitlaufen lassen", "bool"],
+    ["compare.explore", "Modus Erkunden mitlaufen lassen", "bool"],
+    ["compare.playbook", "Modus Playbook mitlaufen lassen", "bool"],
+    ["compare.winrate", "Modus Trefferquote mitlaufen lassen", "bool"],
+    ["compare.final", "Modus Final-3 mitlaufen lassen (Tageskerzen)", "bool"],
+  ]],
   ["Sicherheit: Notbremse und Verlustserie", [
     ["safety.maxDrawdownPct", "Notbremse: max. Verlust vom Höchststand (%, 0 = aus)", "number", "Fällt das Eigenkapital (alle Bots) um so viel unter seinen Höchststand, werden ALLE Positionen geschlossen und alle Bots gestoppt. Gilt für alle drei Bots gemeinsam. Neustart per „Bot starten“ setzt den Höchststand zurück."],
     ["safety.maxLossStreak", "Verluste in Folge bis zur Pause (0 = aus)", "number", "So viele verlorene Trades hintereinander pausieren die Käufe dieses Bots (bestehende Positionen laufen weiter)."],

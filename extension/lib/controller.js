@@ -1,9 +1,9 @@
 // Steuerung: Konfiguration, Zustand, Durchlauf (Tick) und alle Aktionen, die das Popup auslösen kann.
 import { BOTS, BOT_IDS, DEFAULT_BOT, DEFAULTS, MIN_COSTS, botAssets, botDefaults, mergeConfig, validateConfig, symbolOf } from "./config.js";
 import { ema } from "./indicators.js";
-import { getLocal, setLocal, appendTrade } from "./store.js";
+import { getLocal, setLocal, removeLocal, appendTrade } from "./store.js";
 import { Engine } from "./engine.js";
-import { fetchRecent } from "./data.js";
+import { fetchHistory, fetchRecent } from "./data.js";
 import { researchAndBacktest } from "./pipeline.js";
 import { PaperBroker, SolanaWallet, generateKeypair, parseSecretKey } from "./solana.js";
 import { createVault, decryptVault, deleteVault, getUnlockedKey, hasVault, lock, unlock, vaultAddress } from "./vault.js";
@@ -13,7 +13,8 @@ import { HELP, formatStatus, pollCommands } from "./telegram.js";
 import { decorate, flushLogs, queueLog, sendDiscord } from "./discord.js";
 import { DiscordBot, postPanel } from "./discordbot.js";
 import { buildStatsEmbed } from "./stats.js";
-import { appendEquity, byBot, byStrategy, performance, periodStats, realized, sampleCurve, tradesToCsv } from "./profit.js";
+import { MODE_IDS, MODE_LABEL, logText, shadowCfg, shadowKeys, shadowModes, summarizeMode } from "./compare.js";
+import { appendEquity, byBot, equityAt, byStrategy, performance, periodStats, realized, sampleCurve, tradesToCsv } from "./profit.js";
 
 let current = null; // laufender Durchlauf (Promise) – es läuft nie mehr als einer gleichzeitig
 export async function whenIdle() { while (current) await current; }
@@ -31,11 +32,13 @@ export const botOf = (msg) => (BOT_IDS.includes(msg?.bot) ? msg.bot : DEFAULT_BO
 // Kosten dürfen nicht unter die Mindestwerte des Bots fallen (lieber zu hohe als zu niedrige Gebühren).
 const withMinCosts = (cfg, botId) => ({ ...cfg, costs: { feePct: Math.max(cfg.costs.feePct, MIN_COSTS[botId].feePct), slippagePct: Math.max(cfg.costs.slippagePct, MIN_COSTS[botId].slippagePct) } });
 
+const resolveCompare = (cfg) => ({ ...cfg, compare: { ...cfg.compare, enabled: cfg.compare.enabled ?? !!globalThis.__DESKTOP } });   // null = automatisch: nur in der Desktop-App
+
 export async function loadConfig(botId = DEFAULT_BOT) {
   const main = validateConfig(mergeConfig(DEFAULTS, await getLocal("config", {})));
-  if (isDefault(botId)) return withMinCosts(main, botId);
+  if (isDefault(botId)) return resolveCompare(withMinCosts(main, botId));
   const own = mergeConfig(botDefaults(botId), await getLocal(cfgKey(botId), {}));
-  return withMinCosts(validateConfig({ ...own, liveTrading: false, ...pick(main, SHARED), solana: main.solana }), botId);
+  return resolveCompare(withMinCosts(validateConfig({ ...own, liveTrading: false, ...pick(main, SHARED), solana: main.solana }), botId));
 }
 const stateKey = (cfg, botId = DEFAULT_BOT) => (isDefault(botId) ? `botState_${cfg.liveTrading ? "live" : "paper"}` : `botState_${botId}`);
 const defaultState = () => ({ enabled: false, approved: [], report: [], positions: {} });
@@ -135,11 +138,135 @@ export function runTick(opts = {}) {
 // Alle Bots nacheinander (sie teilen sich das Paper-Konto, deshalb nie gleichzeitig). Ein Fehler in einem Bot stoppt die anderen nicht.
 async function tickAll(opts) {
   for (const id of BOT_IDS) await tickOnce(id, opts);
+  if (!opts?.skipShadows) await tickShadows(opts?.fetchFn, opts?.now ?? new Date());
   await recordEquity(opts?.now);
   await checkBreaker(opts?.fetchFn, opts?.now);
   await dailyReport(opts?.fetchFn, opts?.now);
+  if (!opts?.skipShadows) await writeModeLogs(opts?.now ?? new Date());
   await flushLogs(opts?.fetchFn);
   await updateLiveMessage(opts?.fetchFn).catch((e) => console.warn("Discord-Live-Nachricht:", e.message));
+}
+
+// ---- Vergleichs-Modi: Schatten-Läufe mit eigenem Paper-Geld ----------------------------------------------------------
+const historyCache = new Map();   // Kursverlauf für Backtests wird von allen Modi geteilt (3 Stunden gültig)
+async function sharedHistories(cfg, fetchFn) {
+  const out = {};
+  for (const base of cfg.assets) {
+    const symbol = symbolOf(base), key = `${cfg.timeframe}|${symbol}`, hit = historyCache.get(key);
+    if (hit && Date.now() - hit.at < 3 * 3.6e6) { out[symbol] = hit.df; continue; }
+    try { const df = await fetchHistory(cfg, symbol, cfg.pipeline.historyCandles, fetchFn); historyCache.set(key, { at: Date.now(), df }); out[symbol] = df; } catch { /* fehlt: die Prüfung meldet es als Problem */ }
+  }
+  return out;
+}
+
+async function tickShadow(botId, main, mode, { fetchFn, now, cache, budget }) {
+  const k = shadowKeys(botId, mode), cfg = shadowCfg(main, botId, mode);
+  const state = { ...defaultState(), ...(await getLocal(k.state, {})) };
+  const due = !state.lastRefresh || (now - Date.parse(state.lastRefresh)) / 3.6e6 >= cfg.pipeline.revalidateHours;
+  if (due) { if (budget.left <= 0) return; budget.left--; }   // höchstens zwei Neuprüfungen (Backtests) pro Durchlauf: verteilt die Rechenlast
+  const account = (await getLocal(k.account, null)) || { cash: cfg.capital.start, values: {} };
+  account.values ||= {};
+  const events = state.events || [];
+  const notify = async (text) => { events.push({ ts: now.toISOString(), text: String(text).split("\n")[0].slice(0, 300) }); };   // stumm: nichts an Discord/Telegram
+  notify.log = () => {}; notify.report = async () => {};
+  let trades = await getLocal(k.trades, []);
+  const fr = (sym) => { const key = `${cfg.timeframe}|${sym}`; if (!cache.has(key)) cache.set(key, fetchRecent(cfg, sym, fetchFn)); return cache.get(key); };
+  const engine = new Engine({ cfg, state, broker: new PaperBroker(cfg, state, account), notify, botId: `${botId}:${mode}`, fetchRecent: fr,
+    logTrade: async (row) => { trades = [...trades, { ...row, bot: botId, mode }].slice(-400); },
+    save: async () => { await setLocal(k.state, state); await setLocal(k.account, account); },
+    refresher: async () => researchAndBacktest(cfg, fetchFn, await sharedHistories(cfg, fetchFn)) });
+  try { await engine.tick(now); state.lastError = null; }
+  catch (e) { state.lastError = e.message; events.push({ ts: now.toISOString(), text: `FEHLER: ${e.message}` }); }
+  state.lastTick = now.toISOString();
+  state.events = events.slice(-30);
+  await setLocal(k.state, state); await setLocal(k.account, account); await setLocal(k.trades, trades);
+  const eq = account.cash + Object.values(state.positions).reduce((x, p) => x + p.amount * (state.activity?.[p.symbol]?.price ?? p.entryPrice), 0);
+  await setLocal(k.equity, appendEquity(await getLocal(k.equity, []), now.getTime(), eq));
+}
+
+async function tickShadows(fetchFn = fetch, now = new Date()) {
+  const budget = { left: 2 }, cache = new Map();
+  for (const botId of BOT_IDS) {
+    let main;
+    try { main = await loadConfig(botId); } catch { continue; }
+    for (const mode of shadowModes(main)) {
+      try { await tickShadow(botId, main, mode, { fetchFn, now, cache, budget }); } catch (e) { console.warn(`Schatten ${botId}/${mode}:`, e.message); }
+    }
+  }
+}
+
+// Daten eines Modus (Haupt oder Schatten) für Vergleich, Detailansicht und Log-Dateien
+async function modeData(botId, mode, now, hours = 1) {
+  const cfg = await loadConfig(botId), nowMs = now.getTime(), from = nowMs - hours * 3.6e6, main = mode === cfg.backtest.profile;
+  let state, trades, eqLog, equity, cash, capital = cfg.capital.start;
+  if (main) {
+    state = await loadState(cfg, botId); trades = (await getLocal("trades", [])).filter((t) => (t.bot || DEFAULT_BOT) === botId); eqLog = await getLocal("equityLog", []);
+    const a = await getAccount(); equity = a.equity; cash = a.cash;
+  } else {
+    const k = shadowKeys(botId, mode), sc = shadowCfg(cfg, botId, mode);
+    state = { ...defaultState(), ...(await getLocal(k.state, {})) }; trades = await getLocal(k.trades, []); eqLog = await getLocal(k.equity, []);
+    const acc = (await getLocal(k.account, null)) || { cash: sc.capital.start, values: {} };
+    cash = acc.cash; equity = acc.cash + Object.values(state.positions).reduce((x, p) => x + p.amount * (state.activity?.[p.symbol]?.price ?? p.entryPrice), 0);
+  }
+  const prices = Object.fromEntries(Object.entries(state.activity || {}).filter(([, a]) => a.price != null).map(([s, a]) => [s, a.price]));
+  const sum = summarizeMode({ capital, trades, positions: state.positions, prices, eqLog: main ? [] : eqLog });
+  return { bot: botId, botLabel: BOTS[botId].label, mode, main, now: nowMs, hours, capital, equity, cash, sum, positions: state.positions, prices, state, eqLog,
+    trades: trades.filter((t) => Date.parse(t.ts) >= from && (t.action === "ENTRY" || t.action === "EXIT")), allTrades: trades,
+    decisions: (state.decisions || []).filter((x) => Date.parse(x.ts) >= from), approved: state.approved.length,
+    active: state.approved.filter((a) => a.active !== false).map((a) => `${a.symbol.split("/")[0]} ${a.title || a.name}`),
+    eqDelta: equityAt(eqLog, from) != null ? equity - equityAt(eqLog, from) : null,
+    errors: [...(state.lastError ? [state.lastError] : []), ...(state.events || []).filter((e) => /FEHLER|WARNUNG/.test(e.text)).slice(-5).map((e) => e.text)] };
+}
+
+// Pro Modus jede Stunde eine Log-Datei und alle 6 Stunden eine zusammenfassende (nur in der Desktop-App: dort gibt es einen Ordner dafür)
+async function writeModeLogs(now) {
+  const write = globalThis.desktopLog;
+  if (typeof write !== "function") return;
+  const pad = (n) => String(n).padStart(2, "0"), day = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`, hr = pad(now.getHours());
+  const marks = await getLocal("logMarks", {});
+  try {
+    for (const botId of BOT_IDS) {
+      const cfg = await loadConfig(botId);
+      for (const mode of [cfg.backtest.profile, ...shadowModes(cfg)]) {
+        const key = `${botId}/${mode}`, m = marks[key] || {}, hourKey = `${day}-${hr}`, sixKey = `${day}-${Math.floor(now.getHours() / 6)}`;
+        if (m.h !== hourKey) {
+          await write(`${botId}/${mode}/stunde_${day}_${hr}h.txt`, logText(await modeData(botId, mode, now, 1), "hour"));
+          m.h = hourKey;
+        }
+        if (m.s !== sixKey) {
+          await write(`${botId}/${mode}/6h_${day}_${hr}h.txt`, logText(await modeData(botId, mode, now, 6), "6h"));
+          m.s = sixKey;
+        }
+        marks[key] = m;
+      }
+    }
+  } catch (e) { console.warn("Log-Dateien:", e.message); }
+  await setLocal("logMarks", marks);
+}
+
+// Vergleichstabelle: alle Modi aller Bots nebeneinander
+export async function getModes(now = new Date()) {
+  const rows = [];
+  for (const botId of BOT_IDS) {
+    const cfg = await loadConfig(botId), shadows = shadowModes(cfg);
+    for (const mode of MODE_IDS) {
+      const base = { bot: botId, botLabel: BOTS[botId].label, mode, label: MODE_LABEL[mode], main: mode === cfg.backtest.profile };
+      if (!base.main && !shadows.includes(mode)) { rows.push({ ...base, off: true }); continue; }
+      const d = await modeData(botId, mode, now, 1);
+      rows.push({ ...base, equity: d.equity, profit: d.sum.profit, pct: d.sum.pct, realized: d.sum.realized, unrealized: d.sum.unrealized, open: d.sum.open, trades: d.sum.perf.trades,
+        winRate: d.sum.perf.winRate, profitFactor: d.sum.perf.profitFactor, maxDrawdownPct: d.sum.perf.maxDrawdownPct, fees: d.sum.fees, approved: d.approved, active: d.active.length,
+        lastTick: d.state.lastTick || null, lastError: d.state.lastError || null, running: base.main ? !!d.state.enabled : !!d.state.lastTick });
+    }
+  }
+  return { rows, now: now.toISOString() };
+}
+
+export async function getModeDetail(botId, mode, now = new Date()) {
+  const d = await modeData(botId, mode, now, 24);
+  const positions = Object.values(d.positions).map((p) => ({ ...p, price: d.prices[p.symbol] ?? p.entryPrice }));
+  return { bot: botId, botLabel: d.botLabel, mode, label: MODE_LABEL[mode], main: d.main, capital: d.capital, equity: d.equity, cash: d.cash, summary: d.sum, positions, active: d.active, approved: d.approved,
+    trades: d.allTrades.filter((t) => t.action === "ENTRY" || t.action === "EXIT").slice(-20).reverse(), decisions: (d.state.decisions || []).slice(-12).reverse(), events: (d.state.events || []).slice(-10).reverse(),
+    lastTick: d.state.lastTick || null, lastError: d.state.lastError || null, curve: d.main ? [] : sampleCurve(d.eqLog, 300), activity: d.state.activity || {} };
 }
 
 // ---- Gewinn über die Zeit ----------------------------------------------------------------------------------------------
@@ -162,7 +289,7 @@ async function checkBreaker(fetchFn = fetch, now = new Date()) {
   await setLocal("breaker", { ts: now.toISOString(), equity: a.equity, peak, pct });
   for (const id of BOT_IDS) { const c = await loadConfig(id), st = await loadState(c, id); if (st.enabled || Object.keys(st.positions).length) { st.killRequested = true; await setLocal(stateKey(c, id), st); } }
   await makeNotifier(cfg, fetchFn)(`NOT-AUS-BREMSE: Eigenkapital ${a.equity.toFixed(2)} USD liegt ${(((peak - a.equity) / peak) * 100).toFixed(1)} % unter dem Höchststand ${peak.toFixed(2)} USD (Grenze ${pct} %). Alle Positionen werden geschlossen, alle Bots gestoppt. Neu starten setzt den Höchststand zurück.`);
-  await tickAll({ fetchFn, now, skipSafety: true });
+  await tickAll({ fetchFn, now, skipShadows: true });
 }
 
 // Tagesbericht (Discord-Webhook): einmal am Abend ab dailyHour Uhr Ortszeit
@@ -397,6 +524,13 @@ async function handleInner(msg, fetchFn = fetch) {
     case "getStatus": return getStatus(botId);
     case "getAccount": return { ...(await getAccount()), today: (await getProfit()).periods.today };
     case "getProfit": return getProfit();
+    case "getModes": return getModes();
+    case "getModeDetail": return getModeDetail(botId, MODE_IDS.includes(msg.mode) ? msg.mode : cfg.backtest.profile);
+    case "resetShadows": {   // Schatten-Läufe auf Anfang (frisches Paper-Geld, keine Trades) – für einen sauberen Neustart des Vergleichs
+      for (const id of BOT_IDS) for (const m of MODE_IDS) { const k = shadowKeys(id, m); for (const key of Object.values(k)) await removeLocal(key); }
+      await setLocal("logMarks", {});
+      return true;
+    }
     case "exportTrades": return { csv: tradesToCsv((await getLocal("trades", [])).slice(-1000)), count: Math.min(1000, (await getLocal("trades", [])).length) };
     case "clearBreaker": { await setLocal("breaker", null); await setLocal("equityPeak", (await getAccount()).equity); return true; }
     case "saveConfig": { const r = await saveConfig(msg.patch, botId); await syncDiscord(fetchFn).catch(() => {}); return r; }

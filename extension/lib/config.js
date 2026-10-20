@@ -63,6 +63,9 @@ export const DEFAULTS = {
   // startR: oder Vielfaches des ursprünglichen Risikos; lockFraction: Anteil des aktuellen Gewinns, den der Stop sichert (0,75: bei +40 Stop bei +30).
   // Sicherheit: maxDrawdownPct = Notbremse (0 = aus): fällt das Eigenkapital (alle Bots) um so viel unter seinen Höchststand, werden ALLE Positionen geschlossen und alle Bots gestoppt.
   // maxLossStreak = so viele Verluste in Folge pausieren die Käufe dieses Bots für pauseHours Stunden (0 = aus).
+  // Vergleichs-Modi (Desktop-App): neben dem Haupt-Modus laufen die übrigen Modi als Schatten-Läufe mit eigenem Paper-Geld (siehe compare.js).
+  // enabled: null = automatisch (an in der Desktop-App, aus in der Erweiterung); je Modus abschaltbar.
+  compare: { enabled: null, strict: true, explore: true, playbook: true, winrate: true, final: true },
   safety: { maxDrawdownPct: 15, maxLossStreak: 4, pauseHours: 6 },
   trail: { enabled: true, startUsd: 40, startR: 1.0, lockFraction: 0.75, extendTp: true },
   costs: { feePct: 0.26, slippagePct: 0.20 }, // je Order (Kauf UND Verkauf); bewusst hoch angesetzt – lieber zu viele Kosten als zu wenige
@@ -142,6 +145,7 @@ export function validateConfig(c) {
   if (!(r.maxPositionPct > 0 && r.maxPositionPct <= 100)) fail("Max. Positionsgröße muss in (0, 100] % liegen.");
   if (!(r.atrPeriod >= 2 && r.atrStopMult > 0 && r.takeProfitRr > 0)) fail("ATR-/Stop-Parameter ungültig.");
   if (c.costs.feePct < 0 || c.costs.slippagePct < 0) fail("Kosten dürfen nicht negativ sein.");
+  if (c.compare.enabled !== null && typeof c.compare.enabled !== "boolean") fail("Vergleichs-Modi: an/aus muss true/false sein.");
   if (!(c.safety.maxDrawdownPct >= 0 && c.safety.maxDrawdownPct <= 90)) fail("Notbremse: Drawdown muss zwischen 0 (aus) und 90 % liegen.");
   if (!(Number.isInteger(c.safety.maxLossStreak) && c.safety.maxLossStreak >= 0 && c.safety.maxLossStreak <= 20)) fail("Verlustserie: ganze Zahl 0 (aus) bis 20.");
   if (!(c.safety.pauseHours >= 0.5 && c.safety.pauseHours <= 72)) fail("Pause nach Verlustserie: 0,5 bis 72 Stunden.");
