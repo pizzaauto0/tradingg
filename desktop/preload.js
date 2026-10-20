@@ -1,0 +1,11 @@
+// Brücke zwischen den Seiten der Erweiterung und dem Hauptprozess (contextIsolation bleibt an, nur diese Funktionen sind sichtbar).
+const { contextBridge, ipcRenderer } = require("electron");
+
+contextBridge.exposeInMainWorld("electronBridge", {
+  storage: (op, area, arg) => ipcRenderer.invoke("storage", op, area, arg),
+  send: (msg) => ipcRenderer.invoke("rt:send", msg),
+  onMessage: (cb) => ipcRenderer.on("rt:message", (_e, id, msg) => cb(msg, (resp) => ipcRenderer.send("rt:reply", id, resp))),
+  notify: (opts) => ipcRenderer.send("notify", opts),
+  badge: (opts) => ipcRenderer.send("badge", opts),
+  open: (name) => ipcRenderer.send("open", name),
+});

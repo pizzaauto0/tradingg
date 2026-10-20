@@ -1,0 +1,28 @@
+name: Desktop-App bauen (Electron, Windows)
+
+# Manuell starten (Actions → "Desktop-App bauen" → Run workflow) oder durch ein Tag "desktop-v*".
+# Ergebnis: Artefakt "TradingBot-Desktop" mit Installer (.exe) und portabler .exe.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["desktop-v*"]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --no-audit --no-fund
+      - run: npm test
+      - run: npm run dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TradingBot-Desktop
+          path: |
+            desktop/dist/*.exe

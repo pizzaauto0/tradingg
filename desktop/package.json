@@ -1,0 +1,25 @@
+{
+  "name": "trading-bot-desktop",
+  "productName": "Trading-Bot",
+  "version": "1.0.0",
+  "description": "Desktop-App (Electron) mit der Logik der Trading-Bot-Browsererweiterung. Paper-Modus ist Standard.",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test \"test/*.test.js\"",
+    "dist": "electron-builder --win portable nsis --publish never"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "local.tradingbot.desktop",
+    "productName": "Trading-Bot",
+    "files": ["main.js", "preload.js", "chrome-shim.js", "storage.js"],
+    "extraResources": [{ "from": "../extension", "to": "ext", "filter": ["**/*", "!test/**", "!package.json"] }],
+    "win": { "icon": "icon.png", "target": ["portable", "nsis"] },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+  }
+}
