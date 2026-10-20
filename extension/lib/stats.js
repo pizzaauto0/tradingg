@@ -32,6 +32,16 @@ export function buildStatsEmbed(snap, view = "stats") {
   const open = bots.flatMap((b) => b.positions.map((p) => ({ ...p, bot: b.label })));
   const unreal = open.reduce((x, p) => x + (p.price - p.entryPrice) * p.amount, 0);
 
+  if (view === "profit") {
+    const P = snap.profit, names = { today: "📅 Heute", week: "🗓 Letzte Woche (7 Tage)", month: "📆 Letzte 30 Tage", total: "🏁 Insgesamt (seit Start)" };
+    for (const [k, label] of Object.entries(names)) {
+      const p = P.periods[k];
+      fields.push({ name: label, value: `**${usd(p.usd, true)}** (${p.pct >= 0 ? "+" : ""}${p.pct.toFixed(2)} %) Eigenkapital-Änderung${p.partial ? " · Verlauf beginnt später" : ""}\n` +
+        `realisiert ${usd(p.realized, true)} · ${p.buys} Käufe, ${p.sells} Verkäufe${p.sells ? ` (${p.wins} Gewinn, ${p.winRate.toFixed(0)} %)` : ""} · Gebühren ${usd(p.fees)}` });
+    }
+    const per = Object.keys(P.bots).map((id) => `**${P.labels[id]}**: heute ${usd(P.bots[id].today.realized, true)} · 7 Tage ${usd(P.bots[id].week.realized, true)} · gesamt ${usd(P.bots[id].total.realized, true)}`).join("\n");
+    fields.push({ name: "🤖 Je Bot (realisiert, netto)", value: per });
+  }
   if (view === "stats") {
     fields.push({ name: "💼 Konto (gemeinsam)", value: `Eigenkapital **${usd(a.equity)}** (${usd(a.pnl, true)}, ${a.pnlPct >= 0 ? "+" : ""}${a.pnlPct.toFixed(2)} %)\nBargeld ${usd(a.cash)} · gebunden ${usd(a.held)} · offenes Ergebnis ${usd(unreal, true)}` });
     fields.push({ name: "📈 Bilanz (abgeschlossen, netto nach Gebühren)", value: all.closed
@@ -52,9 +62,10 @@ export function buildStatsEmbed(snap, view = "stats") {
     const last = trades.slice(-(view === "trades" ? 15 : 6)).reverse();
     fields.push({ name: view === "trades" ? "🧾 Letzte Käufe & Verkäufe" : "🧾 Zuletzt", value: short(last.map((t) => tradeLine(t, labels)).join("\n") || "noch keine Trades", 1000) });
   }
-  const up = a.pnl > 0.005, down = a.pnl < -0.005;
+  const ref = view === "profit" ? snap.profit.periods.today.usd : a.pnl;
+  const up = ref > 0.005, down = ref < -0.005;
   return {
-    title: view === "positions" ? "📌 Offene Trades" : view === "trades" ? "🧾 Käufe & Verkäufe" : "📊 Live-Statistik",
+    title: view === "profit" ? "💰 Profit" : view === "positions" ? "📌 Offene Trades" : view === "trades" ? "🧾 Käufe & Verkäufe" : "📊 Live-Statistik",
     description: `Paper-Handel (Spielgeld) · Stand ${tstamp(snap.now, "T")}`,
     color: up ? COLORS.up : down ? COLORS.down : COLORS.flat, fields: fields.slice(0, 25), footer: { text: "Trading-Bot · Gebühren eingerechnet" }, timestamp: snap.now,
   };
@@ -63,6 +74,7 @@ export function buildStatsEmbed(snap, view = "stats") {
 // Knopfleiste unter dem Panel bzw. unter der Antwort (custom_id wird vom Bot ausgewertet)
 export const PANEL_BUTTONS = [{ type: 1, components: [
   { type: 2, style: 1, label: "📊 Live-Statistik", custom_id: "stats" },
+  { type: 2, style: 3, label: "💰 Profit", custom_id: "profit" },
   { type: 2, style: 2, label: "📌 Offene Trades", custom_id: "positions" },
   { type: 2, style: 2, label: "🧾 Käufe & Verkäufe", custom_id: "trades" },
 ] }];

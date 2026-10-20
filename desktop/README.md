@@ -24,6 +24,13 @@ gibt es die MetaTrader-App in `../mt5bot`). Nur Kauf (Long), **ohne Hebel**: bei
 Positionsgröße (33 % des Kapitals) das Risiko meist weit unter 1 % – Gewinne und Verluste bleiben klein. USD/EUR ist der Kehrwert von EUR/USD und
 rechnet das Spielgeld 1:1 (Näherung). Yahoo-Daten: Innertageskerzen reichen nur ~60 Tage (5/15/30 Min.) bzw. ~2 Jahre (1 Std.) zurück.
 
+## Profit
+- **Kopfzeile:** links der Gesamtgewinn (Eigenkapital, +USD und +% seit Start), daneben **Profit heute** (seit Mitternacht, Ortszeit).
+- **Tab „💰 Profit“:** Karten für Heute, Letzte Woche (7 Tage), Letzte 30 Tage und Insgesamt (Eigenkapitaländerung inkl. offener Positionen, realisierter Gewinn, Käufe/Verkäufe, Trefferquote, Gebühren), Eigenkapital-Verlauf als Kurve (1 Tag / 7 Tage / 30 Tage / Alles) und realisierter Gewinn je Bot.
+- **Discord:** Knopf **💰 Profit** mit Heute, letzter Woche, 30 Tagen und insgesamt, dazu je Bot. Ein schon gepostetes Panel hat den Knopf noch nicht: in den Einstellungen nochmal „Discord-Knöpfe posten“.
+- Der Verlauf wird alle 5 Minuten gespeichert; beginnt er später als der Zeitraum, steht „Verlauf beginnt später“ (Basis ist dann der erste bekannte Stand).
+- **Chart zoomen (Dashboard):** Mausrad (an der Mausposition), Knöpfe ＋ / － / ↺, Ziehen mit gedrückter Maustaste verschiebt, Doppelklick setzt zurück. Es werden bis zu 600 Kerzen geladen (soweit die Datenquelle sie liefert).
+
 ## Gebühren (bewusst zu hoch)
 Backtest und Paper-Handel rechnen bei **jedem Kauf und jedem Verkauf** Gebühr/Spread plus Rutschen ab. Untergrenzen je Order:
 Krypto 0,26 % + 0,20 %, Währungen 0,03 % + 0,03 %, Metalle 0,06 % + 0,06 % – deutlich mehr als echte Broker verlangen. Niedriger eingestellte Werte

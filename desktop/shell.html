@@ -15,13 +15,20 @@
     #tabs button.active { color: var(--fg); background: var(--bg); border-color: var(--line); font-weight: 600; margin-bottom: -1px; }
     .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; background: var(--muted); } .dot.on { background: var(--ok); } .dot.bad { background: var(--bad); }
     #frames { flex: 1; position: relative; } iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: var(--bg); display: none; } iframe.active { display: block; }
+    #profit { flex: 1; overflow: auto; } #pcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; padding: 12px 16px 0; }
+    .pcard { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; } .pcard h3 { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+    .pcard .big { font-size: 22px; font-weight: 700; } .pcard .sm { color: var(--muted); font-size: 12px; margin-top: 4px; line-height: 1.5; }
+    .pbox { margin: 12px 16px 0; padding: 10px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; } .prow { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    #pcurve { width: 100%; height: 240px; display: block; } #pranges button { margin-left: 4px; padding: 3px 9px; border-radius: 6px; border: 1px solid var(--line); background: none; color: var(--muted); cursor: pointer; font: inherit; } #pranges button.on { color: var(--fg); border-color: var(--accent); }
+    #pbots { width: 100%; border-collapse: collapse; margin-top: 6px; } #pbots td, #pbots th { padding: 5px 6px; text-align: right; border-bottom: 1px solid var(--line); } #pbots td:first-child, #pbots th:first-child { text-align: left; }
     #note { padding: 3px 16px; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--line); }
   </style>
 </head>
 <body>
   <div id="top">
     <h1>Trading-Bot <span class="pill" id="mode">PAPER</span></h1>
-    <div class="kpi"><small>Paper-Konto (gemeinsam) · Eigenkapital</small><strong id="equity">–</strong> <span id="pnl"></span></div>
+    <div class="kpi"><small>Paper-Konto (gemeinsam) · Eigenkapital · gesamt</small><strong id="equity">–</strong> <span id="pnl"></span></div>
+    <div class="kpi" id="todayKpi" title="Eigenkapitaländerung seit Mitternacht (inkl. offener Positionen)"><small>Profit heute</small><strong id="today">–</strong> <span id="todayPct"></span></div>
     <div class="kpi"><small>Bargeld</small><strong id="cash">–</strong></div>
     <div class="kpi"><small>In Positionen gebunden</small><strong id="held">–</strong> <span class="muted" id="split"></span></div>
     <div class="grow"></div>
@@ -32,6 +39,12 @@
   <div id="note">Drei Bots – Währungen, Silber &amp; Gold, Krypto – handeln mit einem gemeinsamen Spielgeld-Konto. Strategien, Märkte und Einstellungen hat jeder Bot für sich.</div>
   <div id="tabs"></div>
   <div id="frames"></div>
+  <div id="profit" hidden>
+    <div id="pcards"></div>
+    <div class="pbox"><div class="prow"><b>Eigenkapital-Verlauf</b><span id="pranges"></span></div><canvas id="pcurve"></canvas></div>
+    <div class="pbox"><b>Realisierter Gewinn je Bot (netto nach Gebühren)</b><table id="pbots"></table></div>
+    <div class="muted" style="padding:4px 16px 16px;font-size:11px">Heute = seit Mitternacht (Ortszeit). Eigenkapitaländerung enthält offene Positionen und ist nach Gebühren; „realisiert“ zählt nur verkaufte Trades. Spielgeld in USD.</div>
+  </div>
   <script src="__shell.js" type="module"></script>
 </body>
 </html>

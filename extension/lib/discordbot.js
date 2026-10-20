@@ -5,7 +5,7 @@ import { buildStatsEmbed, PANEL_BUTTONS, REFRESH_BUTTONS } from "./stats.js";
 
 const API = "https://discord.com/api/v10";
 const GATEWAY = "wss://gateway.discord.gg/?v=10&encoding=json";
-const VIEWS = ["stats", "positions", "trades"];
+const VIEWS = ["stats", "profit", "positions", "trades"];
 
 const CODES = {
   50001: "Missing Access: der Bot ist NICHT auf dem Server dieses Kanals oder sieht den Kanal nicht (Kanal-ID von einem anderen Server? Bot nicht eingeladen?)",
@@ -32,7 +32,7 @@ export async function diagnoseDiscord(token, channelId, fetchFn = fetch) {
 
 export async function postPanel(token, channelId, snap, fetchFn = fetch) {
   const resp = await fetchFn(`${API}/channels/${channelId}/messages`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bot ${token}` },
-    body: JSON.stringify({ content: "Drück einen Knopf für die Live-Statistik – geht von überall (Handy, anderes WLAN, Mobilfunk), solange die App auf dem PC läuft. Nur Ansehen, der Knopf handelt nie.",
+    body: JSON.stringify({ content: "Drück einen Knopf für Live-Statistik oder Profit (heute / letzte Woche / insgesamt) – geht von überall (Handy, anderes WLAN, Mobilfunk), solange die App auf dem PC läuft. Nur Ansehen, der Knopf handelt nie.",
       embeds: [buildStatsEmbed(snap, "stats")], components: PANEL_BUTTONS, allowed_mentions: { parse: [] } }) });
   if (resp.ok) return true;
   const body = await resp.json?.().catch(() => ({})) ?? {};

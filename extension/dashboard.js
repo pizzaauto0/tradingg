@@ -15,10 +15,20 @@ const regimeBadge = (r) => h("span", { class: `badge ${r === "uptrend" ? "up" : 
   r === "uptrend" ? "Aufwärts" : r === "downtrend" ? "Abwärts" : r === "sideways" ? "Seitwärts" : "–");
 
 let selected = null, data = null, hover = null;
+// Zoom/Verschieben des Charts: vis = sichtbare Kerzen, off = um so viele Kerzen nach links verschoben (0 = aktuell)
+let vis = 160, off = 0, drag = null;
+const MIN_VIS = 20, LOAD = 600;
+const clampView = () => { const n = data ? data.t.length : LOAD; vis = Math.round(Math.min(Math.max(vis, MIN_VIS), n)); off = Math.round(Math.min(Math.max(off, 0), Math.max(0, n - vis))); };
+const zoom = (factor, anchor = 1) => {   // anchor 0..1: Stelle im Chart, die beim Zoomen stehen bleibt (1 = rechter Rand/aktuell)
+  const n = data.t.length, oldVis = vis, oldStart = n - vis - off, focus = oldStart + anchor * oldVis;
+  vis = oldVis * factor; clampView();
+  off = n - vis - (focus - anchor * vis); clampView(); draw();
+};
 
 async function refresh() {
   try {
-    data = await call("chart", { symbol: selected, bars: 160 });
+    data = await call("chart", { symbol: selected, bars: LOAD });
+    clampView();
     selected = data.symbol;
     if (document.activeElement?.matches?.("#panels input")) return draw();   // beim Tippen nicht die Eingabefelder neu aufbauen
     render();
@@ -46,7 +56,10 @@ function render() {
   $("legend").replaceChildren(
     h("span", {}, h("i", { style: "background:#4c8dff" }), "EMA 20 (kurzer Trend)"), h("span", {}, h("i", { style: "background:#e0a23a" }), "EMA 50 (längerer Trend)"),
     pos && h("span", {}, h("i", { style: "background:#9aa3ae" }), "Einstieg"), pos && h("span", {}, h("i", { style: "background:#ef6b5c" }), "Stop-Loss"), pos && h("span", {}, h("i", { style: "background:#4cc26a" }), "Ziel"),
-    h("span", {}, "▲ Kauf  ▼ Verkauf"));
+    h("span", {}, "▲ Kauf  ▼ Verkauf"),
+    h("span", { class: "zoom" }, h("button", { class: "btn", title: "Hineinzoomen (Mausrad)", onclick: () => zoom(0.7) }, "＋"), h("button", { class: "btn", title: "Herauszoomen (Mausrad)", onclick: () => zoom(1.4) }, "－"),
+      h("button", { class: "btn", title: "Zurück zur Standardansicht (Doppelklick)", onclick: () => { vis = 160; off = 0; clampView(); draw(); } }, "↺"),
+      h("span", { class: "muted", id: "zoomlbl" }, `${vis} Kerzen${off ? ` · ${off} zurück` : ""}`)));
   // Panels
   const panels = [];
   if (pos) {
@@ -130,7 +143,9 @@ function draw() {
   cv.width = W * dpr; cv.height = H * dpr;
   const g = cv.getContext("2d"); g.scale(dpr, dpr); g.clearRect(0, 0, W, H);
   if (!data) return;
-  const { t, open, high, low, close, ema20, ema50 } = data, pos = data.position, n = t.length;
+  const lbl = $("zoomlbl"); if (lbl) lbl.textContent = `${vis} Kerzen${off ? ` · ${off} zurück` : ""}`;
+  const N = data.t.length, e = N - off, b = Math.max(0, e - vis), sl = (a) => a.slice(b, e);
+  const t = sl(data.t), open = sl(data.open), high = sl(data.high), low = sl(data.low), close = sl(data.close), ema20 = sl(data.ema20), ema50 = sl(data.ema50), pos = data.position, n = t.length;
   const padL = 8, padR = 70, padT = 12, padB = 24, cw = (W - padL - padR) / n;
   let lo = Math.min(...low), hi = Math.max(...high);
   if (pos) { lo = Math.min(lo, pos.stop); hi = Math.max(hi, pos.takeProfit); }
@@ -174,7 +189,20 @@ function draw() {
     tip.style.left = `${Math.min(hover.x + 14, W - 190)}px`; tip.style.top = `${Math.max(4, hover.y - 70)}px`;
   } else $("tip").hidden = true;
 }
-$("chart").addEventListener("mousemove", (e) => { const r = e.target.getBoundingClientRect(); hover = { x: e.clientX - r.left, y: e.clientY - r.top }; draw(); });
+$("chart").addEventListener("mousemove", (e) => {
+  const r = e.target.getBoundingClientRect(); hover = { x: e.clientX - r.left, y: e.clientY - r.top };
+  if (drag && data) { const cw = (r.width - 78) / vis; off = drag.off + Math.round((e.clientX - drag.x) / cw); clampView(); }   // mit gedrückter Maustaste verschieben
+  draw();
+});
+$("chart").addEventListener("mousedown", (e) => { drag = { x: e.clientX, off }; e.target.style.cursor = "grabbing"; });
+addEventListener("mouseup", () => { drag = null; $("chart").style.cursor = "crosshair"; });
+$("chart").addEventListener("dblclick", () => { vis = 160; off = 0; clampView(); draw(); });
+$("chart").addEventListener("wheel", (e) => {   // Mausrad: hinein-/herauszoomen an der Mausposition
+  if (!data) return;
+  e.preventDefault();
+  const r = e.target.getBoundingClientRect(), anchor = Math.min(1, Math.max(0, (e.clientX - r.left - 8) / (r.width - 78)));
+  zoom(e.deltaY < 0 ? 0.8 : 1.25, anchor);
+}, { passive: false });
 $("chart").addEventListener("mouseleave", () => { hover = null; draw(); });
 addEventListener("resize", draw);
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", draw);

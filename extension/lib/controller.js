@@ -13,6 +13,7 @@ import { HELP, formatStatus, pollCommands } from "./telegram.js";
 import { decorate, flushLogs, queueLog, sendDiscord } from "./discord.js";
 import { DiscordBot, postPanel } from "./discordbot.js";
 import { buildStatsEmbed } from "./stats.js";
+import { appendEquity, byBot, periodStats, sampleCurve } from "./profit.js";
 
 let current = null; // laufender Durchlauf (Promise) – es läuft nie mehr als einer gleichzeitig
 export async function whenIdle() { while (current) await current; }
@@ -134,8 +135,26 @@ export function runTick(opts = {}) {
 // Alle Bots nacheinander (sie teilen sich das Paper-Konto, deshalb nie gleichzeitig). Ein Fehler in einem Bot stoppt die anderen nicht.
 async function tickAll(opts) {
   for (const id of BOT_IDS) await tickOnce(id, opts);
+  await recordEquity(opts?.now);
   await flushLogs(opts?.fetchFn);
   await updateLiveMessage(opts?.fetchFn).catch((e) => console.warn("Discord-Live-Nachricht:", e.message));
+}
+
+// ---- Gewinn über die Zeit ----------------------------------------------------------------------------------------------
+async function recordEquity(now = new Date()) {
+  try {
+    const a = await getAccount();
+    await setLocal("equityLog", appendEquity(await getLocal("equityLog", []), now.getTime(), a.equity));
+  } catch (e) { console.warn("Eigenkapital-Verlauf:", e.message); }
+}
+
+// Kennzahlen Heute / 7 Tage / 30 Tage / Insgesamt; für die Kopfzeile, den Profit-Tab und den Discord-Knopf
+export async function getProfit(now = new Date()) {
+  const acc = await getAccount(), nowMs = now.getTime();
+  const log = appendEquity(await getLocal("equityLog", []), nowMs, acc.equity, 0);   // aktueller Stand zählt immer mit (wird nicht gespeichert)
+  const trades = await getLocal("trades", []);
+  return { equity: acc.equity, capital: acc.capital, cash: acc.cash, periods: periodStats({ log, trades, now: nowMs, capital: acc.capital, equity: acc.equity }),
+    bots: byBot(trades, nowMs, BOT_IDS), labels: Object.fromEntries(BOT_IDS.map((id) => [id, BOTS[id].label])), curve: sampleCurve(log, 300), now: now.toISOString() };
 }
 
 // ---- Live-Statistik für Discord ---------------------------------------------------------------------------------------
@@ -145,7 +164,7 @@ export async function getLiveStats() {
     const cfg = await loadConfig(id), st = await loadState(cfg, id);
     bots.push({ id, label: BOTS[id].label, enabled: st.enabled, positions: Object.values(st.positions).map((p) => ({ ...p, price: st.activity?.[p.symbol]?.price ?? p.entryPrice })) });
   }
-  return { account, bots, trades: (await getLocal("trades", [])).slice(-300), now: new Date().toISOString() };
+  return { account, bots, trades: (await getLocal("trades", [])).slice(-300), profit: await getProfit(), now: new Date().toISOString() };
 }
 
 // Knöpfe: ein Bot-Zugang verbindet sich ausgehend mit Discord und beantwortet Klicks (siehe discordbot.js).
@@ -335,7 +354,8 @@ async function handleInner(msg, fetchFn = fetch) {
   const cfg = await loadConfig(botId);
   switch (msg.type) {
     case "getStatus": return getStatus(botId);
-    case "getAccount": return getAccount();
+    case "getAccount": return { ...(await getAccount()), today: (await getProfit()).periods.today };
+    case "getProfit": return getProfit();
     case "saveConfig": { const r = await saveConfig(msg.patch, botId); await syncDiscord(fetchFn).catch(() => {}); return r; }
     case "getLiveStats": return getLiveStats();
     case "discordStatus": return discordBotStatus();

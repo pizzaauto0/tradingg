@@ -24,3 +24,5 @@ body.dash { width:auto; min-height:100vh; }
 .form2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin:6px 0; }
 .fld { display:block; font-size:12px; color:var(--muted); } .fld input[type=number] { width:100%; margin:3px 0 0; }
 .fld.chk { display:flex; gap:6px; align-items:center; margin:8px 0; color:var(--fg); } .fld.chk input { width:auto; margin:0; }
+
+.zoom { margin-left:auto; display:flex; gap:6px; align-items:center; } .zoom .btn { padding:2px 10px; } #chart { cursor:crosshair; user-select:none; }

@@ -10,11 +10,16 @@ const HOOK = "https://discord.com/api/webhooks/123456789012345678/abcDEF_ghi-JKL
 const TOKEN = ["testtoken", "x".repeat(20), "abcdefghijklmnopqrstuvwxyz"].join("_");   // kein echtes Token (Format absichtlich anders)
 const CH = "987654321098765432";
 
+const per = (usd, pct, realized, sells, extra = {}) => ({ usd, pct, realized, buys: sells + 1, sells, wins: Math.ceil(sells / 2), winRate: sells ? (Math.ceil(sells / 2) / sells) * 100 : null, fees: 1.5, ...extra });
+const PROFIT = { periods: { today: per(5.5, 0.55, 4, 2), week: per(12.5, 1.25, 11, 6), month: per(12.5, 1.25, 11, 6, { partial: true }), total: per(12.5, 1.25, 11, 6) },
+  bots: Object.fromEntries(["fx", "metals", "crypto"].map((id) => [id, { today: per(0, 0, 1, 1), week: per(0, 0, 3, 2), month: per(0, 0, 3, 2), total: per(0, 0, 4, 3) }])),
+  labels: { fx: "Währungen", metals: "Silber & Gold", crypto: "Krypto" } };
 const snap = () => ({
   now: "2026-01-01T12:00:00.000Z",
   account: { equity: 1012.5, cash: 700, held: 312.5, pnl: 12.5, pnlPct: 1.25, capital: 1000, bots: [] },
   bots: [{ id: "fx", label: "Währungen", enabled: true, positions: [{ symbol: "EUR/USD", amount: 1000, entryPrice: 1.08, stop: 1.07, takeProfit: 1.1, price: 1.085, strategyName: "breakout(55,20)", openedAt: "2026-01-01T10:00:00Z" }] },
     { id: "metals", label: "Silber & Gold", enabled: false, positions: [] }, { id: "crypto", label: "Krypto", enabled: true, positions: [] }],
+  profit: PROFIT,
   trades: [
     { ts: "2026-01-01T09:00:00Z", bot: "crypto", action: "ENTRY", symbol: "SOL/USD", price: 100, amount: 1, fee: 0.5, pnl: null },
     { ts: "2026-01-01T09:30:00Z", bot: "crypto", action: "EXIT", symbol: "SOL/USD", price: 104, amount: 1, fee: 0.5, pnl: 3 },
@@ -22,6 +27,15 @@ const snap = () => ({
     { ts: "2026-01-01T10:30:00Z", bot: "metals", action: "ENTRY", symbol: "XAU/USD", price: 2000, amount: 0.1, fee: 0.4, pnl: null },
     { ts: "2026-01-01T11:00:00Z", bot: "metals", action: "EXIT", symbol: "XAU/USD", price: 1990, amount: 0.1, fee: 0.4, pnl: -2 },
   ],
+});
+
+test("Profit-Knopf: Heute, letzte Woche, 30 Tage und insgesamt mit Gebühren und je Bot", () => {
+  const e = buildStatsEmbed(snap(), "profit"), text = JSON.stringify(e);
+  assert.equal(e.title, "💰 Profit");
+  for (const k of ["Heute", "Letzte Woche", "Letzte 30 Tage", "Insgesamt"]) assert.ok(text.includes(k), k);
+  assert.match(text, /\*\*\+5\.50 USD\*\* \(\+0\.55 %\)/); assert.match(text, /Verlauf beginnt später/); assert.match(text, /Währungen\*\*: heute \+1\.00 USD/);
+  assert.equal(e.color, 0x2ecc71);
+  for (const f of e.fields) assert.ok(f.value.length <= 1024);
 });
 
 test("Statistik: Bilanz netto, offene Trades mit Stop/Ziel, Käufe und Verkäufe", () => {
@@ -112,7 +126,7 @@ test("Panel: Knöpfe werden mit Bot-Token in den Kanal gepostet; Fehlertexte sin
   assert.match(seen.url, new RegExp(`channels/${CH}/messages$`));
   assert.equal(seen.opt.headers.authorization, `Bot ${TOKEN}`);
   const body = JSON.parse(seen.opt.body);
-  assert.deepEqual(body.components[0].components.map((c) => c.custom_id), ["stats", "positions", "trades"]);
+  assert.deepEqual(body.components[0].components.map((c) => c.custom_id), ["stats", "profit", "positions", "trades"]);
   const jr = (ok, status, j) => ({ ok, status, json: async () => j });
   const api = (post, extra = {}) => async (url, opt) => {
     if (opt?.method === "POST") return post;
