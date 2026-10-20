@@ -7,12 +7,38 @@ const API = "https://discord.com/api/v10";
 const GATEWAY = "wss://gateway.discord.gg/?v=10&encoding=json";
 const VIEWS = ["stats", "positions", "trades"];
 
+const CODES = {
+  50001: "Missing Access: der Bot ist NICHT auf dem Server dieses Kanals oder sieht den Kanal nicht (Kanal-ID von einem anderen Server? Bot nicht eingeladen?)",
+  50013: "Missing Permissions: dem Bot fehlen im Kanal Rechte (Kanal ansehen, Nachrichten senden, Links einbetten) – Rollen/Kanal-Berechtigungen prüfen",
+  10003: "Unknown Channel: diese Kanal-ID gibt es nicht", 10004: "Unknown Guild", 50035: "Ungültige Eingabe",
+  50007: "Cannot send messages to this user", 40001: "Unauthorized",
+};
+
+// Prüft Schritt für Schritt, woran es liegt: Token → Server des Bots → Kanal (Typ, Server) – für verständliche Fehlermeldungen
+export async function diagnoseDiscord(token, channelId, fetchFn = fetch) {
+  const get = async (path) => { const r = await fetchFn(`${API}${path}`, { headers: { authorization: `Bot ${token}` } }); return { r, j: r.ok ? await r.json().catch(() => null) : await r.json().catch(() => ({})) }; };
+  const lines = [];
+  const me = await get("/users/@me");
+  if (!me.r.ok) return "Der Bot-Token wird von Discord abgelehnt – neuen Token unter Developer Portal → Bot → Reset Token holen.";
+  lines.push(`Bot: ${me.j.username}`);
+  const gs = await get("/users/@me/guilds");
+  const guilds = gs.r.ok ? gs.j.map((g) => g.name) : [];
+  lines.push(guilds.length ? `Der Bot ist auf diesen Servern: ${guilds.join(", ")}` : "Der Bot ist auf KEINEM Server – erst mit dem Einladungslink (OAuth2 → URL Generator, Haken „bot“) einladen.");
+  const ch = await get(`/channels/${channelId}`);
+  if (ch.r.ok) lines.push(`Kanal gefunden: #${ch.j.name} (Typ ${ch.j.type}${[0, 5].includes(ch.j.type) ? "" : " – das ist kein normaler Text-Kanal!"}), Server-ID ${ch.j.guild_id}`);
+  else lines.push(`Kanal ${channelId} nicht lesbar (HTTP ${ch.r.status}${ch.j?.code ? ", Code " + ch.j.code : ""}): ${CODES[ch.j?.code] || ch.j?.message || "unbekannt"}`);
+  return lines.join("\n");
+}
+
 export async function postPanel(token, channelId, snap, fetchFn = fetch) {
   const resp = await fetchFn(`${API}/channels/${channelId}/messages`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bot ${token}` },
     body: JSON.stringify({ content: "Drück einen Knopf für die Live-Statistik – geht von überall (Handy, anderes WLAN, Mobilfunk), solange die App auf dem PC läuft. Nur Ansehen, der Knopf handelt nie.",
       embeds: [buildStatsEmbed(snap, "stats")], components: PANEL_BUTTONS, allowed_mentions: { parse: [] } }) });
-  if (!resp.ok) throw new Error(`Discord HTTP ${resp.status}${resp.status === 403 ? " (Bot hat im Kanal keine Rechte „Nachrichten senden“/„Links einbetten“)" : resp.status === 401 ? " (Bot-Token falsch)" : resp.status === 404 ? " (Kanal-ID falsch oder Bot nicht auf dem Server)" : ""}`);
-  return true;
+  if (resp.ok) return true;
+  const body = await resp.json?.().catch(() => ({})) ?? {};
+  let diag = "";
+  try { diag = await diagnoseDiscord(token, channelId, fetchFn); } catch { /* Diagnose ist nur Zugabe */ }
+  throw new Error(`Discord HTTP ${resp.status}${body.code ? ` (Code ${body.code})` : ""}: ${CODES[body.code] || body.message || (resp.status === 401 ? "Bot-Token falsch" : "abgelehnt")}${diag ? "\n\nDiagnose:\n" + diag : ""}`);
 }
 
 export class DiscordBot {

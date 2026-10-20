@@ -98,8 +98,20 @@ test("Panel: Knöpfe werden mit Bot-Token in den Kanal gepostet; Fehlertexte sin
   assert.equal(seen.opt.headers.authorization, `Bot ${TOKEN}`);
   const body = JSON.parse(seen.opt.body);
   assert.deepEqual(body.components[0].components.map((c) => c.custom_id), ["stats", "positions", "trades"]);
-  await assert.rejects(postPanel(TOKEN, CH, snap(), async () => ({ ok: false, status: 403 })), /Rechte/);
-  await assert.rejects(postPanel(TOKEN, CH, snap(), async () => ({ ok: false, status: 401 })), /Token/);
+  const jr = (ok, status, j) => ({ ok, status, json: async () => j });
+  const api = (post, extra = {}) => async (url, opt) => {
+    if (opt?.method === "POST") return post;
+    if (/users\/@me\/guilds/.test(url)) return jr(true, 200, [{ name: "Anderer Server" }]);
+    if (/users\/@me$/.test(url)) return jr(true, 200, { username: "meinbot" });
+    if (/channels\//.test(url)) return extra.channel || jr(false, 403, { code: 50001, message: "Missing Access" });
+    throw new Error(url);
+  };
+  // 403 trotz „Administrator“: Bot ist auf einem anderen Server als der Kanal → die Meldung nennt Code, Ursache und die Server des Bots
+  await assert.rejects(postPanel(TOKEN, CH, snap(), api(jr(false, 403, { code: 50001, message: "Missing Access" }))),
+    (e) => /Code 50001/.test(e.message) && /NICHT auf dem Server/.test(e.message) && /Anderer Server/.test(e.message) && /Bot: meinbot/.test(e.message));
+  await assert.rejects(postPanel(TOKEN, CH, snap(), api(jr(false, 403, { code: 50013, message: "Missing Permissions" }), { channel: jr(true, 200, { name: "logs", type: 0, guild_id: "9" }) })),
+    (e) => /dem Bot fehlen im Kanal Rechte/.test(e.message) && /Kanal gefunden: #logs/.test(e.message));
+  await assert.rejects(postPanel(TOKEN, CH, snap(), async (url, opt) => (opt?.method === "POST" ? jr(false, 401, { message: "401: Unauthorized" }) : jr(false, 401, {}))), /Bot-Token/);
 });
 
 test("Einstellungen: Token wird nie zurückgegeben, Format wird geprüft; Live-Statistik aus dem Speicher; Bot startet nach Speichern", async () => {
