@@ -1,5 +1,5 @@
 // Service Worker: führt alle 30 Sekunden einen Bot-Durchlauf aus und beantwortet Anfragen des Popups.
-import { handle, runTick, pollTelegram, loadConfig, loadState } from "./lib/controller.js";
+import { handle, runTick, pollTelegram, loadConfig, loadState, syncDiscord } from "./lib/controller.js";
 import { BOT_IDS } from "./lib/config.js";
 
 async function ensureAlarm() {
@@ -21,10 +21,12 @@ async function updateBadge() {
 chrome.runtime.onInstalled.addListener(ensureAlarm);
 chrome.runtime.onStartup.addListener(ensureAlarm);
 ensureAlarm();
+syncDiscord().catch(() => {});
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name !== "tick") return;
   await pollTelegram();
+  await syncDiscord().catch(() => {});   // hält die Verbindung für die Discord-Knöpfe am Leben
   await runTick();
   await updateBadge();
 });

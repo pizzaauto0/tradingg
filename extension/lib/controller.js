@@ -11,6 +11,8 @@ import { b58encode } from "./util.js";
 import { summarizeFailures } from "./diagnose.js";
 import { HELP, formatStatus, pollCommands } from "./telegram.js";
 import { decorate, sendDiscord } from "./discord.js";
+import { DiscordBot, postPanel } from "./discordbot.js";
+import { buildStatsEmbed } from "./stats.js";
 
 let current = null; // laufender Durchlauf (Promise) – es läuft nie mehr als einer gleichzeitig
 export async function whenIdle() { while (current) await current; }
@@ -122,6 +124,48 @@ export function runTick(opts = {}) {
 // Alle Bots nacheinander (sie teilen sich das Paper-Konto, deshalb nie gleichzeitig). Ein Fehler in einem Bot stoppt die anderen nicht.
 async function tickAll(opts) {
   for (const id of BOT_IDS) await tickOnce(id, opts);
+  await updateLiveMessage(opts?.fetchFn).catch((e) => console.warn("Discord-Live-Nachricht:", e.message));
+}
+
+// ---- Live-Statistik für Discord ---------------------------------------------------------------------------------------
+export async function getLiveStats() {
+  const account = await getAccount(), bots = [];
+  for (const id of BOT_IDS) {
+    const cfg = await loadConfig(id), st = await loadState(cfg, id);
+    bots.push({ id, label: BOTS[id].label, enabled: st.enabled, positions: Object.values(st.positions).map((p) => ({ ...p, price: st.activity?.[p.symbol]?.price ?? p.entryPrice })) });
+  }
+  return { account, bots, trades: (await getLocal("trades", [])).slice(-300), now: new Date().toISOString() };
+}
+
+// Knöpfe: ein Bot-Zugang verbindet sich ausgehend mit Discord und beantwortet Klicks (siehe discordbot.js).
+let discordBot = null, discordKey = "";
+export async function syncDiscord(fetchFn = fetch, WS = globalThis.WebSocket) {
+  const d = (await loadConfig()).discord, want = d.enabled && d.botToken && d.channelId && WS;
+  const key = want ? `${d.botToken}|${d.channelId}` : "";
+  if (key === discordKey && (!want || discordBot)) return;
+  discordBot?.stop(); discordBot = null; discordKey = key;
+  if (!want) return;
+  discordBot = new DiscordBot({ token: d.botToken, channelId: d.channelId, getSnapshot: getLiveStats, fetchFn, WS });
+  discordBot.start();
+}
+export const discordBotStatus = () => (discordBot ? discordBot.status() : { state: "aus", error: null });
+
+// Eine Nachricht im Kanal (per Webhook), die sich höchstens einmal pro Minute selbst aktualisiert.
+let lastLive = 0;
+async function updateLiveMessage(fetchFn = fetch) {
+  const d = (await loadConfig()).discord;
+  if (!d.enabled || !d.webhook || !d.liveMessage || Date.now() - lastLive < 60_000) return;
+  lastLive = Date.now();
+  const body = JSON.stringify({ username: "Trading-Bot", content: "📌 Live – aktualisiert sich jede Minute (am besten anpinnen)", embeds: [buildStatsEmbed(await getLiveStats(), "stats")], allowed_mentions: { parse: [] } });
+  const headers = { "content-type": "application/json" }, saved = await getLocal("discordLive", {}), tag = d.webhook.slice(-12);
+  if (saved.id && saved.tag === tag) {
+    const r = await fetchFn(`${d.webhook}/messages/${saved.id}`, { method: "PATCH", headers, body });
+    if (r.ok) return;
+    if (r.status !== 404) throw new Error(`Discord HTTP ${r.status}`);
+  }
+  const r = await fetchFn(`${d.webhook}?wait=true`, { method: "POST", headers, body });
+  if (!r.ok) throw new Error(`Discord HTTP ${r.status}`);
+  await setLocal("discordLive", { id: (await r.json())?.id, tag });
 }
 
 // Engine eines Bots; Paper: mit dem gemeinsamen Konto, das nach jedem Speichern mitgeschrieben wird.
@@ -213,7 +257,7 @@ export async function pollTelegram(fetchFn = fetch) {
 
 // ---- Aktionen aus dem Popup --------------------------------------------------------------------------------------
 const maskSecrets = (cfg) => ({ ...cfg, llm: { ...cfg.llm, apiKey: cfg.llm.apiKey ? "***" : "" }, telegram: { ...cfg.telegram, token: cfg.telegram.token ? "***" : "" },
-  discord: { ...cfg.discord, webhook: cfg.discord.webhook ? "***" : "" } });
+  discord: { ...cfg.discord, webhook: cfg.discord.webhook ? "***" : "", botToken: cfg.discord.botToken ? "***" : "" } });
 
 const ownRow = (botId) => (t) => (t.bot || DEFAULT_BOT) === botId;
 
@@ -257,7 +301,15 @@ export async function handle(msg, fetchFn = fetch) {
   switch (msg.type) {
     case "getStatus": return getStatus(botId);
     case "getAccount": return getAccount();
-    case "saveConfig": return saveConfig(msg.patch, botId);
+    case "saveConfig": { const r = await saveConfig(msg.patch, botId); await syncDiscord(fetchFn).catch(() => {}); return r; }
+    case "getLiveStats": return getLiveStats();
+    case "discordStatus": return discordBotStatus();
+    case "postDiscordPanel": {
+      if (!cfg.discord.botToken || !cfg.discord.channelId) throw new Error("Bot-Token und Kanal-ID eintragen und speichern.");
+      await postPanel(cfg.discord.botToken, cfg.discord.channelId, await getLiveStats(), fetchFn);
+      await syncDiscord(fetchFn);
+      return true;
+    }
     case "getConfig": return maskSecrets(cfg);
     case "testDiscord": {
       if (!cfg.discord.webhook) throw new Error("Kein Discord-Webhook eingetragen (zuerst speichern).");

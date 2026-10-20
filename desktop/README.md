@@ -38,6 +38,18 @@ Einstellungen (⚙ in irgendeinem Tab) → *Discord-Meldungen*: Webhook-URL einf
 - Warnungen (Not-Aus, Tageslimit, Fehler).
 Die Webhook-URL gehört nicht ins Repository und nicht in Chats: wer sie kennt, kann in deinen Kanal schreiben. Bei Verdacht in Discord löschen und neu anlegen.
 
+## Discord-Knöpfe: Live-Statistik vom Handy
+Ein Knopf unter einer Nachricht kann nur von einem **Discord-Bot** beantwortet werden (ein Webhook allein kann das nicht). Einmal einrichten:
+1. discord.com/developers/applications → *New Application* → links *Bot* → *Reset Token* → Token kopieren (nie weitergeben).
+2. *OAuth2 → URL Generator*: Haken bei `bot`, Rechte *Nachrichten senden* und *Links einbetten* → erzeugte URL öffnen, Bot auf deinen Server einladen.
+3. In Discord *Einstellungen → Erweitert → Entwicklermodus* an; den Kanal rechtsklicken → *Kanal-ID kopieren*.
+4. In der App ⚙ Einstellungen → *Discord-Meldungen*: *Aktiv*, Bot-Token und Kanal-ID eintragen, speichern, **„Discord-Knöpfe posten“**.
+
+Im Kanal erscheint eine Nachricht mit drei Knöpfen: **📊 Live-Statistik** (Konto, Bilanz netto nach Gebühren, offene Trades mit Stop-Loss/Take-Profit und aktuellem Ergebnis, letzte Käufe/Verkäufe),
+**📌 Offene Trades**, **🧾 Käufe & Verkäufe**. Die Antwort sieht nur, wer geklickt hat; „🔄 Aktualisieren“ lädt sie neu. Der Klick geht von **jedem Gerät und jedem Netz** (Handy, Mobilfunk, anderes WLAN),
+weil sich die App auf dem PC *ausgehend* mit Discord verbindet – es muss nichts freigegeben werden. Voraussetzung: die App läuft auf dem PC (Tray-Symbol) und der PC hat Internet.
+Die Knöpfe zeigen nur an, sie können nichts kaufen oder verkaufen und antworten nur im eingerichteten Kanal. Optional: *Live-Nachricht im Kanal* – eine Webhook-Nachricht, die sich jede Minute selbst aktualisiert (anpinnen).
+
 ## Starten (mit Node.js ≥ 20)
 ```
 cd desktop

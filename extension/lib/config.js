@@ -75,7 +75,9 @@ export const DEFAULTS = {
   },
   llm: { enabled: false, model: "claude-sonnet-5-5", apiKey: "", maxTokens: 4000 },
   telegram: { enabled: false, token: "", chatId: "" },
-  discord: { enabled: false, webhook: "" }, // Meldungen (Kauf/Verkauf mit Stop, Ziel, Begründung; Stundenbericht) per Discord-Webhook
+  // Discord: webhook = Meldungen (Kauf/Verkauf mit Stop, Ziel, Begründung; Stundenbericht). botToken + channelId = Knöpfe für die Live-Statistik
+  // (Klicks gehen von überall, der Bot verbindet sich nur ausgehend). liveMessage = eine Nachricht im Kanal, die sich jede Minute selbst aktualisiert.
+  discord: { enabled: false, webhook: "", botToken: "", channelId: "", liveMessage: false },
 };
 
 // Mindestkosten je Order (Gebühr/Spread + Rutschen, in %) – weit über den echten Kosten, damit Backtest und Paper-Handel eher zu pessimistisch sind.
@@ -132,6 +134,8 @@ export function validateConfig(c) {
   if (!(r.maxPositionPct > 0 && r.maxPositionPct <= 100)) fail("Max. Positionsgröße muss in (0, 100] % liegen.");
   if (!(r.atrPeriod >= 2 && r.atrStopMult > 0 && r.takeProfitRr > 0)) fail("ATR-/Stop-Parameter ungültig.");
   if (c.costs.feePct < 0 || c.costs.slippagePct < 0) fail("Kosten dürfen nicht negativ sein.");
+  if (c.discord.channelId && !/^\d{5,25}$/.test(c.discord.channelId)) fail("Discord-Kanal-ID ungültig (nur Ziffern; Kanal rechtsklicken → „Kanal-ID kopieren“, Entwicklermodus nötig).");
+  if (c.discord.botToken && !/^[\w.-]{30,120}$/.test(c.discord.botToken)) fail("Discord-Bot-Token ungültig.");
   if (c.discord.webhook && !WEBHOOK_RE.test(c.discord.webhook)) fail("Discord-Webhook ungültig (erwartet: https://discord.com/api/webhooks/<Zahl>/<Schlüssel>).");
   if (!(Number.isInteger(c.pipeline.maxActiveStrategies) && c.pipeline.maxActiveStrategies >= 1)) fail("Anzahl aktiver Strategien muss eine ganze Zahl >= 1 sein.");
   if (!(c.backtest.oosFraction > 0 && c.backtest.oosFraction < 1)) fail("oosFraction muss in (0, 1) liegen.");
