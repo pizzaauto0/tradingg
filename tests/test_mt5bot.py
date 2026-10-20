@@ -169,7 +169,8 @@ def test_config_validation(tmp_path):
 def test_default_config_builds_all_strategies():
     c = types.SimpleNamespace(**{k: getattr(base_cfg, k) for k in dir(base_cfg) if k.isupper()})
     for p in c.PROFILES:
-        make_strategy(p["strategy"], p["allow_short"])
+        if p["strategy"]["type"] != "auto":   # „auto“ wird erst aus den Prüfergebnissen zu Strategien
+            make_strategy(p["strategy"], p["allow_short"])
 
 
 def test_rsi_pullback_signals_after_dip_in_uptrend():

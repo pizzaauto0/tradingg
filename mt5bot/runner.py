@@ -71,19 +71,50 @@ class Runner:
         self.halted_day: str | None = None
         self.state = self._load_state()
         self.tf = {n: getattr(mt5, f"TIMEFRAME_{n}", None) for n in TF_NAMES}
+        self.overlay = False                  # True: Einstellungen kommen aus mt5bot_settings.json (App) und lassen sich im Betrieb neu laden
+        self.research_state: dict = {"running": False}
+        self.profiles = self.build_profiles(cfg)
+
+    def build_profiles(self, cfg) -> list[dict]:
+        """Profile aus der Konfiguration; das Profil „auto“ wird in je eine Strategie pro geprüfter Kombination aufgefächert."""
+        from . import research
+        out = []
         for p in cfg.PROFILES:
             if not p.get("enabled", True):
                 continue
-            strat = make_strategy(p["strategy"], p.get("allow_short", False))
             if not 0 < p.get("risk_percent", 1.0) <= 2.0:
                 raise ValueError(f"{p['name']}: risk_percent muss zwischen 0 und 2 liegen")
             for sym, tf in p["markets"].items():
                 if tf not in TF_NAMES:
                     raise ValueError(f"{p['name']}: Zeitrahmen {tf} unbekannt ({TF_NAMES})")
-            self.profiles.append({**p, "strat": strat})
-        magics = [p["magic"] for p in self.profiles] + sorted(self.manual_magics())
+            if p["strategy"].get("type") == "auto":
+                for i, a in enumerate(research.load(self.folder).get("active", [])[:9]):
+                    spec = {"type": a["type"], "params": a["params"]}
+                    out.append({**p, "name": f"auto:{a['market']}:{a['type']}", "magic": p["magic"] + i, "markets": {a["market"]: a["tf"]},
+                                "strategy": spec, "strat": make_strategy(spec, p.get("allow_short", False))})
+                continue
+            out.append({**p, "strat": make_strategy(p["strategy"], p.get("allow_short", False))})
+        magics = [p["magic"] for p in out] + sorted(self.manual_magics_for(cfg))
         if len(set(magics)) != len(magics):
             raise ValueError("Jedes Profil braucht eine eigene Magic Number")
+        return out
+
+    def manual_magics_for(self, cfg) -> set:
+        m = getattr(cfg, "MANUAL", None) or {}
+        return {m["magic"]} if m.get("enabled", True) and m.get("magic") else set()
+
+    def reload_settings(self, why: str = "") -> str:
+        """Einstellungen/Strategien neu einlesen, ohne den Bot zu beenden. Offene Positionen bleiben unberührt (Magic Numbers)."""
+        from . import settings
+        if not self.overlay:
+            return "Neu laden ist nur in der App möglich (Einstellungen kommen aus config.py)."
+        cfg = settings.effective(self.folder)
+        profiles = self.build_profiles(cfg)
+        self.cfg, self.profiles = cfg, profiles
+        self.ensure_symbols(strict=False)
+        self.last_bar = {k: v for k, v in self.last_bar.items() if any(k[0] == p["name"] for p in profiles)}
+        log.info(f"Einstellungen neu geladen ({why}): " + (", ".join(p["name"] for p in profiles) or "keine Profile"))
+        return "Neu geladen. Profile: " + (", ".join(p["name"] for p in profiles) or "keine")
 
     # ---------- Protokoll: Entscheidungen und Berichte ----------
     def _logdir(self) -> Path:
@@ -145,6 +176,58 @@ class Runner:
         return f"{direction.upper()} {name} eröffnet." if ok else f"{name}: Order NICHT ausgeführt – Details im Log."
 
     # ---------- Befehle aus dem Portal (Warteschlange, ausgeführt in der Hauptschleife) ----------
+    def maybe_revalidate(self) -> None:
+        from . import research
+        hours = getattr(self.cfg, "RESEARCH_REVALIDATE_HOURS", 0)
+        if self.overlay and hours and any(p["strategy"].get("type") == "auto" for p in self.cfg.PROFILES if p.get("enabled", True)) \
+                and not self.research_state.get("running") and research.due(self.folder, hours):
+            mode = next(p["strategy"].get("mode", "strict") for p in self.cfg.PROFILES if p["strategy"].get("type") == "auto")
+            log.info(self.start_research(mode, "automatisch"))
+
+    def start_research(self, mode: str, why: str) -> str:
+        """Holt die Kerzen (Hauptfaden – MT5 verträgt nur einen Faden) und rechnet die Backtests in einem Hintergrundfaden."""
+        import threading
+
+        from . import research, settings
+        if self.research_state.get("running"):
+            return "Eine Prüfung läuft schon."
+        if mode not in settings.MODES:
+            return "Unbekannter Modus."
+        auto = next((p for p in self.cfg.PROFILES if p["strategy"].get("type") == "auto"), None)
+        if auto is None:
+            return "Kein Profil „auto“ vorhanden."
+        self.ensure_symbols(strict=False)
+        bars = int(getattr(self.cfg, "RESEARCH_BARS", 5000))
+        frames, missing = {}, []
+        for name, tf in auto["markets"].items():
+            df = self.closed_bars(name, tf, bars)
+            if df is None:
+                missing.append(name)
+            else:
+                frames[(name, tf)] = df
+        if not frames:
+            return "Keine Kurse geladen – sind die Märkte im MetaTrader verfügbar? (" + ", ".join(missing) + ")"
+        max_active = int(getattr(self.cfg, "RESEARCH_MAX_ACTIVE", 2))
+        st = {"running": True, "done": 0, "total": 1, "label": "starte …", "mode": mode, "missing": missing, "started": time.time(), "cancel": False}
+        self.research_state = st
+
+        def work():
+            try:
+                rows = research.run(frames, mode, progress=lambda d, t, l: st.update(done=d, total=t, label=l), cancel=lambda: st["cancel"])
+                if st["cancel"]:
+                    st.update(running=False, label="abgebrochen")
+                    return
+                data = research.finish(self.folder, rows, mode, bars, max_active)
+                st.update(running=False, label="fertig", summary=research.summary_text(data), finished=True)
+                self.web_cmds.put(("", {"type": "reload"}))  # neue Strategien im Hauptfaden übernehmen
+            except Exception as e:
+                log.exception("Strategie-Prüfung fehlgeschlagen")
+                st.update(running=False, label=f"Fehler: {type(e).__name__}: {e}")
+
+        threading.Thread(target=work, daemon=True, name="research").start()
+        log.info(f"Strategie-Prüfung gestartet ({why}, Modus {mode}, {len(frames)} Märkte)")
+        return f"Prüfung gestartet: {len(frames)} Märkte" + (f" (nicht gefunden: {', '.join(missing)})" if missing else "") + ". Ergebnis im Reiter „Strategien“."
+
     def submit_web_command(self, cmd: dict) -> str:
         cid = secrets.token_hex(6)
         self.web_results[cid] = {"done": False, "text": "wartet …"}
@@ -174,6 +257,21 @@ class Runner:
                     text = self.do_pause(False, "Portal")
                 elif t in ("buy", "sell"):
                     text = self.do_open("long" if t == "buy" else "short", str(cmd["symbol"]).upper(), float(cmd.get("risk", 0.5)), "Portal")
+                elif t == "reload":
+                    text = self.reload_settings("Portal")
+                elif t == "research":
+                    text = self.start_research(str(cmd.get("mode", "strict")), "Portal")
+                elif t == "research_cancel":
+                    self.research_state["cancel"] = True
+                    text = "Prüfung wird abgebrochen …"
+                elif t == "research_toggle":
+                    from . import research
+                    research.set_manual(self.folder, cmd["market"], cmd["tf"], cmd["strategy"], cmd["params"], cmd.get("title", cmd["strategy"]), bool(cmd["on"]))
+                    text = "Strategie " + ("aktiviert" if cmd["on"] else "deaktiviert") + ". " + self.reload_settings("Strategie-Wahl")
+                elif t == "save_settings":
+                    from . import settings
+                    settings.write(self.folder, settings.validate(cmd["overlay"]))
+                    text = "Gespeichert. " + self.reload_settings("Einstellungen")
                 else:
                     text = "Unbekannter Befehl."
             except Exception as e:  # ein Befehl darf den Bot nie stoppen
@@ -338,10 +436,11 @@ class Runner:
             raise RuntimeError("SICHERHEITSSTOPP: Echtgeld-Konto erkannt, ALLOW_REAL_ACCOUNT ist False.")
         self.ensure_symbols()
 
-    def ensure_symbols(self) -> None:
+    def ensure_symbols(self, strict: bool = True) -> None:
         wanted = {s for p in self.profiles for s in p["markets"]} | {r for p in self.profiles for r in p["strat"].needs}
+        wanted |= {s for p in self.cfg.PROFILES if p["strategy"].get("type") == "auto" for s in p["markets"]}  # Märkte für die Strategie-Prüfung
         wanted |= set((getattr(self.cfg, "MANUAL", None) or {}).get("symbols", []))
-        for name in sorted(wanted):
+        for name in sorted(wanted - set(self.symbols)):
             base = [name] + [a for a in self.cfg.SYMBOL_ALIASES.get(name, []) if a != name]
             sfx = getattr(self.cfg, "SYMBOL_SUFFIXES", [""])
             for cand in dict.fromkeys(b + x for b in base for x in sfx):  # reihenfolge-erhaltend, ohne Doppelte
@@ -354,16 +453,16 @@ class Runner:
                     break
             else:
                 log.warning(f"{name}: beim Broker nicht gefunden – wird übersprungen (Symbolname in SYMBOL_ALIASES eintragen)")
-        if not self.symbols:
+        if strict and not self.symbols:
             raise RuntimeError("Keines der Symbole ist beim Broker verfügbar.")
 
     # ---------- Daten & Positionen ----------
-    def closed_bars(self, name: str, tf: str) -> pd.DataFrame | None:
+    def closed_bars(self, name: str, tf: str, count: int | None = None) -> pd.DataFrame | None:
         sym = self.symbols.get(name)
-        return None if sym is None else self.closed_bars_raw(sym, tf)
+        return None if sym is None else self.closed_bars_raw(sym, tf, count)
 
-    def closed_bars_raw(self, sym: str, tf: str) -> pd.DataFrame | None:
-        rates = self.mt5.copy_rates_from_pos(sym, self.tf[tf], 0, self.cfg.BARS_HISTORY)
+    def closed_bars_raw(self, sym: str, tf: str, count: int | None = None) -> pd.DataFrame | None:
+        rates = self.mt5.copy_rates_from_pos(sym, self.tf[tf], 0, count or self.cfg.BARS_HISTORY)
         if rates is None or len(rates) < 10:
             return None
         df = pd.DataFrame(rates)
@@ -1024,6 +1123,7 @@ class Runner:
                 except Exception:
                     log.exception("Datenstand für die Oberfläche konnte nicht geschrieben werden")
                 try:
+                    self.maybe_revalidate()
                     self.maybe_report()
                     self.periodic_summary()
                 except Exception:

@@ -30,6 +30,9 @@ MT5_TERMINAL_PATH = None       # z. B. r"C:\Program Files\MetaTrader 5\terminal6
 DASHBOARD_OPEN_BROWSER = True  # Browser beim Start öffnen (beim Autostart sinnvollerweise False)
 BARS_HISTORY = 600             # so viele Kerzen je Markt für die Berechnung
 POLL_SECONDS = 30
+RESEARCH_BARS = 5000           # Kerzen je Markt für die Strategie-Prüfung (App: Reiter „Strategien“)
+RESEARCH_REVALIDATE_HOURS = 0  # Auto-Profil: Strategien automatisch neu prüfen alle X Stunden (0 = nur auf Knopfdruck)
+RESEARCH_MAX_ACTIVE = 2        # Auto-Profil: so viele zugelassene Strategien handeln je Markt
 HEARTBEAT_MINUTES = 15         # Lebenszeichen + Marktzustand im Log
 LOG_FILE = "mt5bot.log"
 LOG_DIR = "logs"               # Ordner für Protokolle: entscheidungen_<Datum>.log und bericht_<Datum>.txt
@@ -102,6 +105,13 @@ PROFILES = [
         "markets": {"XAUUSD": "H4"},
         "strategy": {"type": "gold_silver_divergence", "params": {"reference": "XAGUSD", "trend_len": 150, "ret_len": 20,
                                                                     "band_lookback": 100, "band_mult": 1.5}},
+        "allow_short": False, "risk_percent": 1.0, "atr_stop_mult": 2.0, "rr": 2.0,
+    },
+    {   # Wie die Erweiterung: Strategien werden auf den MetaTrader-Kerzen geprüft (Reiter „Strategien“); nur zugelassene handeln.
+        # Je aktive Strategie wird eine eigene Magic Number ab 100301 vergeben (bis 100309).
+        "name": "auto", "enabled": False, "magic": 100301,
+        "markets": {"XAUUSD": "D1", "XAGUSD": "D1", "XPTUSD": "D1", "EURUSD": "D1", "USDJPY": "D1", "US500": "D1", "USTEC": "D1"},
+        "strategy": {"type": "auto", "mode": "strict"},
         "allow_short": False, "risk_percent": 1.0, "atr_stop_mult": 2.0, "rr": 2.0,
     },
 ]
