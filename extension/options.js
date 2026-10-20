@@ -116,17 +116,17 @@ async function build() {
   form.append(h("div", { class: "btns" }, h("button", { class: "btn primary", type: "submit" }, "Speichern"),
     h("button", { class: "btn", type: "button", onclick: async () => {
       try { await call("postDiscordPanel"); const st = await call("discordStatus"); alert(`Panel mit Knöpfen im Kanal gepostet. Bot: ${st.state}${st.error ? " (" + st.error + ")" : ""}. Klick auf „📊 Live-Statistik“ in Discord – auch vom Handy.`); }
-      catch (e) { errorBox.textContent = e.message + " (Token und Kanal-ID zuerst speichern.)"; errorBox.hidden = false; }
+      catch (e) { errorBox.textContent = e.message + " (Token und Kanal-ID zuerst speichern.)"; errorBox.hidden = false; scrollTo(0, 0); alert(errorBox.textContent); }
     } }, "Discord-Knöpfe posten"),
     h("button", { class: "btn", type: "button", onclick: async () => {
-      try { await call("testDiscordLog"); alert("Testnachricht an den Log-Webhook gesendet."); } catch (e) { errorBox.textContent = e.message + " (Log-Webhook zuerst eintragen und speichern.)"; errorBox.hidden = false; }
+      try { await call("testDiscordLog"); alert("Testnachricht an den Log-Webhook gesendet."); } catch (e) { errorBox.textContent = e.message + " (Log-Webhook zuerst eintragen und speichern.)"; errorBox.hidden = false; scrollTo(0, 0); alert(errorBox.textContent); }
     } }, "Log-Webhook testen"),
     h("button", { class: "btn", type: "button", onclick: async () => {
-      try { await call("testDiscord"); alert("Testnachricht an Discord gesendet."); } catch (e) { errorBox.textContent = e.message + " (Webhook zuerst eintragen und speichern.)"; errorBox.hidden = false; }
+      try { await call("testDiscord"); alert("Testnachricht an Discord gesendet."); } catch (e) { errorBox.textContent = e.message + " (Webhook zuerst eintragen und speichern.)"; errorBox.hidden = false; scrollTo(0, 0); alert(errorBox.textContent); }
     } }, "Discord testen"),
     h("button", { class: "btn danger", type: "button", onclick: async () => {
       if (!confirm("Paper-Konto auf das Startkapital zurücksetzen? Gilt für ALLE Bots und geht nur ohne offene Positionen. Die Trade-Historie bleibt.")) return;
-      try { await call("resetAccount"); alert("Paper-Konto zurückgesetzt."); } catch (e) { errorBox.textContent = e.message; errorBox.hidden = false; }
+      try { await call("resetAccount"); alert("Paper-Konto zurückgesetzt."); } catch (e) { errorBox.textContent = e.message; errorBox.hidden = false; scrollTo(0, 0); alert(errorBox.textContent); }
     } }, "Paper-Konto zurücksetzen")));
 
   form.onsubmit = async (ev) => {
