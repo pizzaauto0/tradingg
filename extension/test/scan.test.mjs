@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { installFakeChrome, makeCandles, marketFetch, TF_MS } from "./helpers.mjs";
 import { handle, runTick, getStatus, whenIdle } from "../lib/controller.js";
-import { ASSETS, DEFAULTS } from "../lib/config.js";
+import { ASSETS, DEFAULTS, botAssets } from "../lib/config.js";
 import { fetchHistory, fetchRecent } from "../lib/data.js";
 import { markActive } from "../lib/pipeline.js";
 
@@ -10,14 +10,18 @@ const T0 = Math.floor(Date.now() / TF_MS) * TF_MS - 3 * TF_MS;
 const wave = (k, n = 3000) => makeCandles(n, T0, (i) => 100 * k + Math.sin(i / (9 + k)) * 4 * k + (i % 17) * 0.05 * k);
 
 test("Marktliste: Adressen sind gültiges Base58 und eindeutig, Kurssymbole eindeutig", () => {
-  const re = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/, list = Object.values(ASSETS);
+  const re = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/, list = botAssets("crypto").map((k) => ASSETS[k]);
   assert.ok(list.length >= 10, "viele Märkte");
   const withMint = list.filter((a) => a.mint); // Gold (PAXG) hat bewusst keine Adresse: nur Paper
   assert.equal(list.length - withMint.length, 1);
   for (const a of withMint) assert.match(a.mint, re, a.symbol);
   assert.equal(new Set(withMint.map((a) => a.mint)).size, withMint.length);
   assert.equal(new Set(list.map((a) => a.kraken)).size, list.length);
-  assert.deepEqual(DEFAULTS.assets, Object.keys(ASSETS), "Standard: alle Märkte scannen");
+  assert.deepEqual(DEFAULTS.assets, botAssets("crypto"), "Standard: alle Krypto-Märkte scannen");
+  // Währungen und Metalle: Yahoo-Symbole, eindeutige Kurssymbole, nie über Solana handelbar
+  const other = [...botAssets("fx"), ...botAssets("metals")].map((k) => ASSETS[k]);
+  assert.ok(other.length >= 8 && other.every((a) => a.yahoo && !a.mint && !a.kraken));
+  assert.equal(new Set(Object.values(ASSETS).map((a) => a.symbol)).size, Object.keys(ASSETS).length);
 });
 
 test("Historie: Coinbase liefert genug Kerzen, wenn Bitstamp den Markt nicht kennt (z. B. JUP)", async () => {

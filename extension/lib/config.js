@@ -21,12 +21,38 @@ export const ASSETS = {
   PAXG: { symbol: "PAXG/USD", kraken: "PAXGUSD", coinbase: "PAXG-USD", mint: "" }, // Gold-Token: nur Paper (keine verifizierte Solana-Adresse hinterlegt)
   W: { symbol: "W/USD", kraken: "WUSD", coinbase: "W-USD", mint: "85VBFQZC9TZkfaptBWjvUw7YbZjy52A6mjtPGjstQAmQ" },
 };
-export const symbolOf = (base) => ASSETS[base].symbol;
+// Währungen und Metalle (Kursdaten von Yahoo Finance, nur Paper – kein Handel über Solana). Preise sind USD je Einheit,
+// damit Paper-Geld (USD) und Kurs zusammenpassen; USD/EUR ist der Kehrwert von EUR/USD (Näherung: Paper-Geld wird 1:1 als Einheit gerechnet).
+// Metalle sind Futures (GC=F Gold, SI=F Silber, PL=F Platin) – Handelszeiten wie an der Terminbörse.
+Object.assign(ASSETS, {
+  EURUSD: { symbol: "EUR/USD", yahoo: "EURUSD=X", mint: "" },
+  GBPUSD: { symbol: "GBP/USD", yahoo: "GBPUSD=X", mint: "" },
+  AUDUSD: { symbol: "AUD/USD", yahoo: "AUDUSD=X", mint: "" },
+  NZDUSD: { symbol: "NZD/USD", yahoo: "NZDUSD=X", mint: "" },
+  USDEUR: { symbol: "USD/EUR", yahoo: "EURUSD=X", invert: true, mint: "" },
+  XAU: { symbol: "XAU/USD", yahoo: "GC=F", mint: "" },
+  XAG: { symbol: "XAG/USD", yahoo: "SI=F", mint: "" },
+  XPT: { symbol: "XPT/USD", yahoo: "PL=F", mint: "" },
+});
+export const GROUPS = {
+  fx: ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDEUR"],
+  metals: ["XAU", "XAG", "XPT"],
+};
+export const groupOf = (key) => (GROUPS.fx.includes(key) ? "fx" : GROUPS.metals.includes(key) ? "metals" : "crypto");
+// Die drei Bots der Desktop-App. Alle handeln mit EINEM gemeinsamen Paper-Konto (siehe controller.loadAccount).
+export const BOTS = { fx: { label: "Währungen" }, metals: { label: "Silber & Gold" }, crypto: { label: "Krypto" } };
+export const BOT_IDS = ["fx", "metals", "crypto"];
+export const DEFAULT_BOT = "crypto"; // ohne Angabe gilt der Krypto-Bot – so verhalten sich alte Aufrufe (Erweiterung, Tests) wie bisher
+export const botAssets = (botId) => (botId === "crypto" ? Object.keys(ASSETS).filter((k) => groupOf(k) === "crypto") : GROUPS[botId] || []);
+
+export const symbolOf = (key) => ASSETS[key].symbol;
 export const baseOf = (symbol) => symbol.split("/")[0];
+export const assetOf = (symbol) => Object.values(ASSETS).find((a) => a.symbol === symbol);
+export const keyOf = (symbol) => Object.keys(ASSETS).find((k) => ASSETS[k].symbol === symbol);
 
 export const DEFAULTS = {
   liveTrading: false, // Paper-Modus ist Standard
-  assets: Object.keys(ASSETS), // alle Märkte werden gescannt; gehandelt wird, was den Backtest besteht
+  assets: botAssets("crypto"), // alle Märkte werden gescannt; gehandelt wird, was den Backtest besteht
   timeframe: "15m", // 5m | 15m | 30m | 1h
   capital: { start: 300 }, // Paper: Startguthaben. Live: maximal eingesetztes USDC
   risk: {
@@ -50,6 +76,18 @@ export const DEFAULTS = {
   llm: { enabled: false, model: "claude-sonnet-5-5", apiKey: "", maxTokens: 4000 },
   telegram: { enabled: false, token: "", chatId: "" },
 };
+
+// Standardwerte je Bot: Währungen/Metalle brauchen andere Zeitrahmen, Kosten und Märkte als Krypto; Kapital, Telegram und LLM sind für alle gleich.
+export function botDefaults(botId) {
+  if (botId === "crypto" || !BOTS[botId]) return DEFAULTS;
+  const fx = botId === "fx";
+  return mergeConfig(DEFAULTS, {
+    assets: botAssets(botId), timeframe: "1h",
+    risk: { maxPositionPct: 33, maxOpenPositions: 2 },
+    costs: fx ? { feePct: 0.01, slippagePct: 0.01 } : { feePct: 0.03, slippagePct: 0.03 },
+    backtest: { minCandles: 1000 },
+  });
+}
 
 // Gelockerte Mindestwerte des Erkundungsmodus (nur Paper): zeigt Trades, beweist aber nichts.
 export const EXPLORE_THRESHOLDS = { minTrades: 8, minReturnPct: 0, maxDrawdownPct: 25, minSharpe: 0, minWinRatePct: 35, minProfitFactor: 1.0, minOosReturnPct: -5 };

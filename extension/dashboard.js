@@ -1,5 +1,6 @@
 // Dashboard: Kerzenchart mit Trend (EMA 20/50), Einstieg/Stop/Ziel der offenen Position, Live-Gewinn und Signal-Matrix.
-const call = async (type, extra = {}) => { const r = await chrome.runtime.sendMessage({ type, ...extra }); if (!r?.ok) throw new Error(r?.error); return r.result; };
+const BOT = new URLSearchParams(location.search).get("bot") || "crypto";
+const call = async (type, extra = {}) => { const r = await chrome.runtime.sendMessage({ type, bot: BOT, ...extra }); if (!r?.ok) throw new Error(r?.error); return r.result; };
 const $ = (id) => document.getElementById(id);
 function h(tag, props = {}, ...kids) {
   const e = document.createElement(tag);

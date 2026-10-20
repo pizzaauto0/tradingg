@@ -1,6 +1,6 @@
 // Popup: Status, Strategien, Trades, Wallet. Alle Inhalte werden per textContent gesetzt (kein innerHTML).
 import { nearMisses, summarizeFailures } from "./lib/diagnose.js";
-import { ASSETS } from "./lib/config.js";
+import { BOTS, botAssets } from "./lib/config.js";
 const view = document.getElementById("view"), errorBox = document.getElementById("error");
 let tab = "status", status = null, balances = null, secretToShow = null, busy = false;
 
@@ -15,8 +15,12 @@ function h(tag, props = {}, ...kids) {
   return e;
 }
 
+// Welcher Bot? Die Desktop-App öffnet diese Seite je Tab mit ?bot=fx | metals | crypto; ohne Angabe: Krypto (wie in der Erweiterung).
+const BOT = BOTS[new URLSearchParams(location.search).get("bot")] ? new URLSearchParams(location.search).get("bot") : "crypto";
+const IS_CRYPTO = BOT === "crypto";
+
 async function call(type, extra = {}) {
-  const r = await chrome.runtime.sendMessage({ type, ...extra });
+  const r = await chrome.runtime.sendMessage({ type, bot: BOT, ...extra });
   if (!r?.ok) throw new Error(r?.error || "Keine Antwort vom Hintergrunddienst");
   return r.result;
 }
@@ -122,7 +126,7 @@ function renderStatus() {
 
   const daily = state.risk?.startEquity;
   out.push(card("Konto & Risiko",
-    live ? row("Wallet", vault.address || "–", "mono") : row("Paper-Guthaben (USD)", fmt(state.paperCash ?? cfg.capital.start)),
+    live ? row("Wallet", vault.address || "–", "mono") : row("Paper-Bargeld (gemeinsames Konto, USD)", fmt(state.paperCash ?? cfg.capital.start)),
     row("Tageslimit", state.risk?.halted ? "erreicht – Handel pausiert" : `max. ${cfg.risk.maxDailyLossPct}% Verlust`, state.risk?.halted ? "bad" : ""),
     daily && row("Tagesstart-Eigenkapital", fmt(daily)),
     row("Risiko pro Trade", `${cfg.risk.riskPerTradePct}%`),
@@ -147,7 +151,7 @@ function diagnosisCard(report, approved) {
   if (!approved.length) lines.push(h("div", { class: "hint" }, cfg.backtest.profile !== "strict"
     ? "Auch mit gelockerten Werten besteht nichts – der Markt bietet aktuell keine Strategie mit Vorteil."
     : "Mit den strengen Standardwerten besteht nichts. Das ist bei ruhigen oder seitwärts laufenden Märkten und hohen Handelskosten normal. Mehr Optionen: Einstellungen → Prüfmodus / Zeitrahmen."));
-  const allAssets = Object.keys(ASSETS);
+  const allAssets = botAssets(BOT);
   if (cfg.assets.length < allAssets.length) lines.push(h("div", { class: "btns" },
     btn(`Alle ${allAssets.length} Märkte scannen & besten 5 aktivieren`, () => act(async () => {
       await call("saveConfig", { patch: { assets: allAssets } });
@@ -166,9 +170,9 @@ function diagnosisCard(report, approved) {
       alert(researchSummary(await call("research")));
     }), "primary")));
   if (!cfg.liveTrading && cfg.backtest.profile !== "final") lines.push(h("div", { class: "btns" },
-    btn("Final-3: Tageskerzen, BTC/ETH/SOL/Gold (nur Paper)", () => act(async () => {
-      if (!confirm("Final-3 (Paper): Tageskerzen, Märkte BTC, ETH, SOL und Gold (PAXG). Der Bot nutzt fest 3 Strategien aus unserem Massen-Test (Connors RSI(2), Video-Methode (Trend + Rücksetzer an der Linie), IBS) – Idee: Trend intakt + kurzer Rücksetzer → kaufen, mit Stop-Loss und doppeltem Ziel. Auf Tageskerzen gibt es nur wenige Trades pro Monat. Nicht als profitabel bewiesen.\n\nFortfahren?")) return;
-      await call("saveConfig", { patch: { timeframe: "1d", assets: ["BTC", "ETH", "SOL", "PAXG"], backtest: { profile: "final" } } });
+    btn(IS_CRYPTO ? "Final-3: Tageskerzen, BTC/ETH/SOL/Gold (nur Paper)" : "Final-3: Tageskerzen, alle Märkte dieses Bots (nur Paper)", () => act(async () => {
+      if (!confirm("Final-3 (Paper): Tageskerzen, " + (IS_CRYPTO ? "Märkte BTC, ETH, SOL und Gold (PAXG)" : "alle Märkte dieses Bots") + ". Der Bot nutzt fest 3 Strategien aus unserem Massen-Test (Connors RSI(2), Video-Methode (Trend + Rücksetzer an der Linie), IBS) – Idee: Trend intakt + kurzer Rücksetzer → kaufen, mit Stop-Loss und doppeltem Ziel. Auf Tageskerzen gibt es nur wenige Trades pro Monat. Nicht als profitabel bewiesen.\n\nFortfahren?")) return;
+      await call("saveConfig", { patch: { timeframe: "1d", assets: IS_CRYPTO ? ["BTC", "ETH", "SOL", "PAXG"] : botAssets(BOT), backtest: { profile: "final" } } });
       alert(researchSummary(await call("research")));
     }), "primary")));
   if (!cfg.liveTrading && cfg.backtest.profile !== "winrate") lines.push(h("div", { class: "btns" },
@@ -252,6 +256,11 @@ function renderWallet() {
 
 // ---------------------------------------------------------------- Rahmen
 const RENDER = { status: renderStatus, strategies: renderStrategies, trades: renderTrades, wallet: renderWallet };
+if (!IS_CRYPTO) {   // Währungen und Metalle gibt es nur im Paper-Modus: kein Wallet-Tab, kein Live
+  document.querySelector('nav button[data-tab="wallet"]')?.remove();
+  document.title = `Trading-Bot – ${BOTS[BOT].label}`;
+  document.querySelector("header .muted").textContent = BOTS[BOT].label;
+}
 
 function draw() {
   const pill = document.getElementById("mode");
@@ -271,9 +280,10 @@ document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click
   if (status) draw();
 }));
 
-document.getElementById("dash").addEventListener("click", () => chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") }));
-document.getElementById("settings").addEventListener("click", () => chrome.runtime.openOptionsPage());
+document.getElementById("dash").addEventListener("click", () => chrome.tabs.create({ url: chrome.runtime.getURL(`dashboard.html?bot=${BOT}`) }));
+document.getElementById("settings").addEventListener("click", () => chrome.tabs.create({ url: chrome.runtime.getURL(`options.html?bot=${BOT}`) }));
 
+addEventListener("message", (e) => { if (e.data?.type === "refresh" && e.origin === location.origin) refresh(); }); // die Desktop-App stößt damit eine Aktualisierung an
 refresh();
 // Nicht neu zeichnen, solange der Nutzer in einem Passwortfeld tippt oder ein Schlüssel angezeigt wird.
 setInterval(() => { if (!busy && !secretToShow && !document.activeElement?.matches?.("input")) refresh(); }, 5000);

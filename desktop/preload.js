@@ -7,5 +7,5 @@ contextBridge.exposeInMainWorld("electronBridge", {
   onMessage: (cb) => ipcRenderer.on("rt:message", (_e, id, msg) => cb(msg, (resp) => ipcRenderer.send("rt:reply", id, resp))),
   notify: (opts) => ipcRenderer.send("notify", opts),
   badge: (opts) => ipcRenderer.send("badge", opts),
-  open: (name) => ipcRenderer.send("open", name),
+  open: (name, query) => ipcRenderer.send("open", name, query),
 });

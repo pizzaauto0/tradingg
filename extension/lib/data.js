@@ -1,7 +1,7 @@
 // Marktdaten (öffentliche REST-APIs, keine Schlüssel) je Asset: Kraken für Live-Kerzen, Bitstamp (Fallback Kraken) für die Historie.
 // Kerzen-Format: { t: [ms], open: [], high: [], low: [], close: [], volume: [] }
 import { sleep, timeframeSeconds } from "./util.js";
-import { ASSETS, baseOf } from "./config.js";
+import { assetOf } from "./config.js";
 
 const KRAKEN_INTERVAL = { "5m": 5, "15m": 15, "30m": 30, "1h": 60, "1d": 1440 };
 
@@ -26,9 +26,36 @@ async function getJson(fetchFn, url) {
   return resp.json();
 }
 
-// Letzte ~720 Kerzen; die letzte kann noch in Bildung sein.
+// Yahoo Finance (öffentlich, ohne Schlüssel) für Währungen und Metalle. Innertageskerzen gibt es nur für begrenzte Zeiträume:
+// 5m/15m/30m ca. 60 Tage, 1h ca. 2 Jahre, 1d viele Jahre. Lücken (null) werden verworfen; USD/EUR ist der Kehrwert von EUR/USD.
+const YAHOO_INTERVAL = { "5m": "5m", "15m": "15m", "30m": "30m", "1h": "60m", "1d": "1d" };
+const YAHOO_RANGE_RECENT = { "5m": "5d", "15m": "5d", "30m": "10d", "1h": "1mo", "1d": "1y" };
+const YAHOO_RANGE_HISTORY = { "5m": "60d", "15m": "60d", "30m": "60d", "1h": "730d", "1d": "10y" };
+
+export async function yahooFrame(cfg, asset, range, fetchFn) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(asset.yahoo)}?interval=${YAHOO_INTERVAL[cfg.timeframe]}&range=${range}&includePrePost=false`;
+  const body = await getJson(fetchFn, url);
+  const res = body?.chart?.result?.[0];
+  if (!res?.timestamp) throw new Error(`Yahoo: ${body?.chart?.error?.description || "keine Daten"}`);
+  const q = res.indicators.quote[0], rows = [];
+  for (let i = 0; i < res.timestamp.length; i++) {
+    const o = q.open[i], h = q.high[i], l = q.low[i], c = q.close[i];
+    if ([o, h, l, c].some((x) => x == null || !(x > 0))) continue;
+    rows.push(asset.invert ? { t: res.timestamp[i] * 1000, o: 1 / o, h: 1 / l, l: 1 / h, c: 1 / c, v: q.volume[i] || 0 }
+      : { t: res.timestamp[i] * 1000, o, h, l, c, v: q.volume[i] || 0 });
+  }
+  return rowsToFrame(rows);
+}
+
+// Letzte Kerzen; die letzte kann noch in Bildung sein.
 export async function fetchRecent(cfg, symbol, fetchFn = fetch) {
-  const body = await getJson(fetchFn, `https://api.kraken.com/0/public/OHLC?pair=${ASSETS[baseOf(symbol)].kraken}&interval=${KRAKEN_INTERVAL[cfg.timeframe]}`);
+  const asset = assetOf(symbol);
+  if (asset.yahoo) {
+    const df = await yahooFrame(cfg, asset, YAHOO_RANGE_RECENT[cfg.timeframe], fetchFn);
+    if (df.close.length < 150) throw new Error("Zu wenige Kerzen von Yahoo erhalten");
+    return df;
+  }
+  const body = await getJson(fetchFn, `https://api.kraken.com/0/public/OHLC?pair=${assetOf(symbol).kraken}&interval=${KRAKEN_INTERVAL[cfg.timeframe]}`);
   if (body.error?.length) throw new Error(`Kraken: ${body.error.join(", ")}`);
   const key = Object.keys(body.result).find((k) => k !== "last");
   const df = rowsToFrame(body.result[key].map((r) => ({ t: r[0] * 1000, o: +r[1], h: +r[2], l: +r[3], c: +r[4], v: +r[6] })));
@@ -41,7 +68,7 @@ async function bitstampHistory(cfg, symbol, n, fetchFn) {
   let end = Math.floor(Date.now() / 1000), rows = [], empty = 0;
   while (rows.length < n && empty < 2) {
     const start = end - 1000 * step;
-    const body = await getJson(fetchFn, `https://www.bitstamp.net/api/v2/ohlc/${ASSETS[baseOf(symbol)].bitstamp}/?step=${step}&limit=1000&start=${start}&end=${end}`);
+    const body = await getJson(fetchFn, `https://www.bitstamp.net/api/v2/ohlc/${assetOf(symbol).bitstamp}/?step=${step}&limit=1000&start=${start}&end=${end}`);
     const page = (body?.data?.ohlc ?? []).map((k) => ({ t: +k.timestamp * 1000, o: +k.open, h: +k.high, l: +k.low, c: +k.close, v: +k.volume }));
     empty = page.length ? 0 : empty + 1;
     rows = rows.concat(page);
@@ -52,7 +79,7 @@ async function bitstampHistory(cfg, symbol, n, fetchFn) {
 
 // Coinbase Exchange (öffentlich): max. 300 Kerzen je Abfrage, Granularitäten 1/5/15 Minuten, 1 Stunde.
 async function coinbaseHistory(cfg, symbol, n, fetchFn) {
-  const product = ASSETS[baseOf(symbol)].coinbase, step = timeframeSeconds(cfg.timeframe);
+  const product = assetOf(symbol).coinbase, step = timeframeSeconds(cfg.timeframe);
   if (!product) throw new Error("nicht bei Coinbase hinterlegt");
   if (![60, 300, 900, 3600, 86400].includes(step)) throw new Error("Zeitrahmen bei Coinbase nicht verfügbar");
   let end = Math.floor(Date.now() / 1000), rows = [], empty = 0;
@@ -72,8 +99,8 @@ async function coinbaseHistory(cfg, symbol, n, fetchFn) {
 // Historie für Backtests: nacheinander Bitstamp, Coinbase, Kraken (nur 720 Kerzen) – die erste Quelle mit genug Kerzen
 // gewinnt, sonst die längste. Schneidet die noch offene letzte Kerze ab.
 export async function fetchHistory(cfg, symbol, n = cfg.pipeline.historyCandles, fetchFn = fetch) {
-  const asset = ASSETS[baseOf(symbol)], errors = [];
-  const sources = [
+  const asset = assetOf(symbol), errors = [];
+  const sources = asset.yahoo ? [["Yahoo", () => yahooFrame(cfg, asset, YAHOO_RANGE_HISTORY[cfg.timeframe], fetchFn)]] : [
     asset.bitstamp && ["Bitstamp", async () => rowsToFrame(await bitstampHistory(cfg, symbol, n, fetchFn))],
     asset.coinbase && ["Coinbase", async () => rowsToFrame(await coinbaseHistory(cfg, symbol, n, fetchFn))],
     ["Kraken", () => fetchRecent(cfg, symbol, fetchFn)],

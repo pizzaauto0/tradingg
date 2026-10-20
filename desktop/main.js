@@ -9,7 +9,7 @@ const EXT = app.isPackaged ? path.join(process.resourcesPath, "ext") : path.join
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
   ".png": "image/png", ".json": "application/json", ".svg": "image/svg+xml" };
 const PAGES = {
-  popup: { url: "app://ext/popup.html", width: 480, height: 780, title: "Trading-Bot" },
+  main: { url: "app://ext/__shell.html", width: 1100, height: 860, title: "Trading-Bot" },
   dashboard: { url: "app://ext/dashboard.html", width: 1240, height: 860, title: "Trading-Bot – Dashboard" },
   options: { url: "app://ext/options.html", width: 960, height: 860, title: "Trading-Bot – Einstellungen" },
 };
@@ -22,6 +22,8 @@ const windows = {};
 const pending = new Map();
 let nextId = 1;
 
+const injectShim = (html) => html.replace(/<head[^>]*>/i, (m) => `${m}<script src="__shim.js"></script>`);   // Shim vor allen anderen Skripten einsetzen
+
 function serve(request) {
   const u = new URL(request.url);
   const rel = decodeURIComponent(u.pathname).replace(/^\/+/, "");
@@ -29,12 +31,13 @@ function serve(request) {
   const type = (p) => MIME[path.extname(p).toLowerCase()] || "application/octet-stream";
   const send = (body, p) => new Response(body, { headers: { "Content-Type": type(p), "Cache-Control": "no-store" } });
   if (rel === "__shim.js") return send(fs.readFileSync(path.join(__dirname, "chrome-shim.js")), "x.js");
+  if (rel === "__shell.js") return send(fs.readFileSync(path.join(__dirname, "shell.js")), "x.js");
+  if (rel === "__shell.html") return send(injectShim(fs.readFileSync(path.join(__dirname, "shell.html"), "utf8")), "x.html");
   if (rel === "__background.html") return send(BACKGROUND_HTML, "x.html");
   const file = path.normalize(path.join(EXT, rel));
   if (!file.startsWith(EXT + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) return new Response("nicht gefunden", { status: 404 });
   if (path.extname(file) === ".html") {   // Shim vor allen anderen Skripten einsetzen
-    const html = fs.readFileSync(file, "utf8").replace(/<head[^>]*>/i, (m) => `${m}<script src="__shim.js"></script>`);
-    return send(html, file);
+    return send(injectShim(fs.readFileSync(file, "utf8")), file);
   }
   return send(fs.readFileSync(file), file);
 }
@@ -49,17 +52,19 @@ function lockdown(win) {
   win.webContents.on("will-navigate", (e, url) => { if (!url.startsWith("app://ext/")) { e.preventDefault(); if (/^https?:/.test(url)) shell.openExternal(url); } });
 }
 
-function openPage(name, { show = true } = {}) {
+function openPage(name, { show = true, query = "" } = {}) {
   const spec = PAGES[name];
   if (!spec) return;
-  let win = windows[name];
+  query = /^\?bot=(fx|metals|crypto)$/.test(query) ? query : "";   // nur bekannte Bots als Parameter
+  const key = name + query;
+  let win = windows[key];
   if (win && !win.isDestroyed()) { if (show) { win.show(); win.focus(); } return win; }
   win = new BrowserWindow({ width: spec.width, height: spec.height, title: spec.title, show, icon: path.join(__dirname, "icon.png"), backgroundColor: "#0d1117", webPreferences: webPrefs() });
   lockdown(win);
   win.removeMenu?.();
-  win.on("close", (e) => { if (name === "popup" && !quitting) { e.preventDefault(); win.hide(); } });   // Hauptfenster schließen = im Hintergrund weiterlaufen
-  win.loadURL(spec.url);
-  windows[name] = win;
+  win.on("close", (e) => { if (name === "main" && !quitting) { e.preventDefault(); win.hide(); } });   // Hauptfenster schließen = im Hintergrund weiterlaufen
+  win.loadURL(spec.url + query);
+  windows[key] = win;
   return win;
 }
 
@@ -89,17 +94,17 @@ function setupIpc() {
   });
   ipcMain.on("rt:reply", (_e, id, resp) => { const fn = pending.get(id); if (fn) { pending.delete(id); fn(resp); } });
   ipcMain.on("notify", (_e, o) => { if (Notification.isSupported()) new Notification({ title: String(o.title || "Trading-Bot"), body: String(o.message || "") }).show(); });
-  ipcMain.on("badge", (_e, { text }) => { tray?.setToolTip(`Trading-Bot${text ? " – " + text : ""}`); windows.popup?.setTitle(`Trading-Bot${text ? " [" + text + "]" : ""}`); });
-  ipcMain.on("open", (_e, name) => openPage(name));
+  ipcMain.on("badge", (_e, { text }) => { tray?.setToolTip(`Trading-Bot${text ? " – " + text : ""}`); windows.main?.setTitle(`Trading-Bot${text ? " [" + text + "]" : ""}`); });
+  ipcMain.on("open", (_e, name, query) => openPage(String(name), { query: String(query || "") }));
 }
 
 function setupTray() {
   tray = new Tray(nativeImage.createFromPath(path.join(__dirname, "icon.png")).resize({ width: 16, height: 16 }));
   tray.setToolTip("Trading-Bot");
   const menu = () => Menu.buildFromTemplate([
-    { label: "Öffnen", click: () => openPage("popup") },
-    { label: "Dashboard", click: () => openPage("dashboard") },
-    { label: "Einstellungen", click: () => openPage("options") },
+    { label: "Öffnen", click: () => openPage("main") },
+    { label: "Dashboard (Krypto)", click: () => openPage("dashboard") },
+    { label: "Einstellungen (Krypto)", click: () => openPage("options") },
     { type: "separator" },
     { label: "Beim Windows-Start automatisch starten", type: "checkbox", checked: app.getLoginItemSettings().openAtLogin,
       click: (i) => app.setLoginItemSettings({ openAtLogin: i.checked, args: ["--background"] }) },
@@ -107,12 +112,12 @@ function setupTray() {
     { label: "Beenden (Bot stoppt)", click: () => { quitting = true; app.quit(); } },
   ]);
   tray.setContextMenu(menu());
-  tray.on("click", () => openPage("popup"));
+  tray.on("click", () => openPage("main"));
 }
 
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
-  app.on("second-instance", () => openPage("popup"));
+  app.on("second-instance", () => openPage("main"));
   app.whenReady().then(() => {
     store = new Store(path.join(app.getPath("userData"), "storage.json"));
     protocol.handle("app", serve);
@@ -120,7 +125,7 @@ else {
     setupIpc();
     startBackground();
     setupTray();
-    openPage("popup", { show: !process.argv.includes("--background") });
+    openPage("main", { show: !process.argv.includes("--background") });
   });
   app.on("before-quit", () => { quitting = true; store?.flush(); });
   app.on("window-all-closed", () => {});   // läuft über das Tray-Symbol weiter

@@ -26,6 +26,7 @@ export function makeCandles(n, lastT, f = (i) => 100 + 0.12 * i + Math.sin(i / 3
 import { ASSETS } from "../lib/config.js";
 const bySource = (key) => Object.fromEntries(Object.values(ASSETS).filter((a) => a[key]).map((a) => [a[key], a.symbol]));
 const KR = bySource("kraken"), BS = bySource("bitstamp"), CB = bySource("coinbase");
+const YH = Object.fromEntries(Object.values(ASSETS).filter((a) => a.yahoo && !a.invert).map((a) => [a.yahoo, a.symbol]));
 export function marketFetch(world) {
   const json = (b) => ({ ok: true, status: 200, json: async () => b, text: async () => JSON.stringify(b) });
   const notFound = { ok: false, status: 404, json: async () => ({}), text: async () => "" };
@@ -54,6 +55,12 @@ export function marketFetch(world) {
       const start = Date.parse(u.searchParams.get("start")), end = Date.parse(u.searchParams.get("end")), rows = [];
       for (let i = df.t.length - 1; i >= 0 && rows.length < 300; i--) if (df.t[i] >= start && df.t[i] < end) rows.push([df.t[i] / 1000, df.low[i], df.high[i], df.open[i], df.close[i], df.volume[i]]);
       return json(rows);
+    }
+    if (u.host === "query1.finance.yahoo.com") {   // Währungen/Metalle: world.dfs["EUR/USD"] usw.; Lücken-Test über world.gaps (Indizes mit null)
+      const df = frame(YH[decodeURIComponent(u.pathname.split("/")[4])]);
+      if (!df) return json({ chart: { result: null, error: { description: "No data found, symbol may be delisted" } } });
+      const gap = new Set(world.gaps || []), pick = (a) => a.map((x, i) => (gap.has(i) ? null : x));
+      return json({ chart: { result: [{ timestamp: df.t.map((t) => t / 1000), indicators: { quote: [{ open: pick(df.open), high: pick(df.high), low: pick(df.low), close: pick(df.close), volume: df.volume }] } }], error: null } });
     }
     throw new Error(`unerwartete URL ${url}`);
   };

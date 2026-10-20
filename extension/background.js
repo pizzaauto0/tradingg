@@ -1,5 +1,6 @@
 // Service Worker: führt alle 30 Sekunden einen Bot-Durchlauf aus und beantwortet Anfragen des Popups.
 import { handle, runTick, pollTelegram, loadConfig, loadState } from "./lib/controller.js";
+import { BOT_IDS } from "./lib/config.js";
 
 async function ensureAlarm() {
   if (!(await chrome.alarms.get("tick"))) chrome.alarms.create("tick", { periodInMinutes: 0.5 });
@@ -7,10 +8,13 @@ async function ensureAlarm() {
 
 async function updateBadge() {
   try {
-    const cfg = await loadConfig(), st = await loadState(cfg);
-    const text = st.pending ? "!" : st.locked ? "LOCK" : st.killRequested ? "KILL" : st.enabled ? (cfg.liveTrading ? "LIVE" : "ON") : "";
+    const all = [];
+    for (const id of BOT_IDS) { const cfg = await loadConfig(id); all.push([cfg, await loadState(cfg, id)]); }
+    const any = (f) => all.some(([c, s]) => f(c, s));
+    const text = any((c, s) => s.pending) ? "!" : any((c, s) => s.locked) ? "LOCK" : any((c, s) => s.killRequested) ? "KILL"
+      : any((c, s) => s.enabled && c.liveTrading) ? "LIVE" : any((c, s) => s.enabled) ? "ON" : "";
     await chrome.action.setBadgeText({ text });
-    await chrome.action.setBadgeBackgroundColor({ color: st.pending || st.locked || st.killRequested ? "#c0392b" : cfg.liveTrading ? "#b9770e" : "#2e7d32" });
+    await chrome.action.setBadgeBackgroundColor({ color: any((c, s) => s.pending || s.locked || s.killRequested) ? "#c0392b" : any((c) => c.liveTrading) ? "#b9770e" : "#2e7d32" });
   } catch (e) { console.error(e); }
 }
 

@@ -197,9 +197,10 @@ export class SolanaWallet {
 // ---- Paper-Broker (Simulation, keine echten Orders) -------------------------------------------------------------------
 export class PaperBroker {
   mode = "paper";
-  constructor(cfg, state) {
+  // account: gemeinsames Paper-Konto mehrerer Bots ({ cash, values }); ohne Angabe hat der Bot sein eigenes Guthaben im Zustand
+  constructor(cfg, state, account = null) {
     this.fee = cfg.costs.feePct / 100; this.slip = cfg.costs.slippagePct / 100;
-    this.s = state.paper = state.paper || { cash: cfg.capital.start };
+    this.s = account || (state.paper = state.paper || { cash: cfg.capital.start });
   }
   async cash() { return this.s.cash; }
   async openLong(symbol, amount, stop, refPrice) {

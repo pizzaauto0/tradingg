@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trading-Bot</title>
+  <link rel="stylesheet" href="ui.css">
+  <style>
+    html, body { height: 100%; } body { display: flex; flex-direction: column; overflow: hidden; }
+    #top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--card); }
+    #top h1 { margin: 0; font-size: 16px; } .kpi small { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+    .kpi strong { font-size: 17px; } .grow { flex: 1; }
+    #tabs { display: flex; gap: 4px; padding: 6px 12px 0; border-bottom: 1px solid var(--line); }
+    #tabs button { flex: 0 0 auto; padding: 9px 18px; border-radius: 8px 8px 0 0; border: 1px solid transparent; border-bottom: 0; background: none; color: var(--muted); cursor: pointer; font: inherit; }
+    #tabs button.active { color: var(--fg); background: var(--bg); border-color: var(--line); font-weight: 600; margin-bottom: -1px; }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; background: var(--muted); } .dot.on { background: var(--ok); } .dot.bad { background: var(--bad); }
+    #frames { flex: 1; position: relative; } iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: var(--bg); display: none; } iframe.active { display: block; }
+    #note { padding: 3px 16px; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--line); }
+  </style>
+</head>
+<body>
+  <div id="top">
+    <h1>Trading-Bot <span class="pill" id="mode">PAPER</span></h1>
+    <div class="kpi"><small>Paper-Konto (gemeinsam) · Eigenkapital</small><strong id="equity">–</strong> <span id="pnl"></span></div>
+    <div class="kpi"><small>Bargeld</small><strong id="cash">–</strong></div>
+    <div class="kpi"><small>In Positionen gebunden</small><strong id="held">–</strong> <span class="muted" id="split"></span></div>
+    <div class="grow"></div>
+    <button class="btn" id="startAll">Alle starten</button>
+    <button class="btn" id="stopAll">Alle stoppen</button>
+    <button class="btn danger" id="killAll">NOT-AUS (alle)</button>
+  </div>
+  <div id="note">Drei Bots – Währungen, Silber &amp; Gold, Krypto – handeln mit einem gemeinsamen Spielgeld-Konto. Strategien, Märkte und Einstellungen hat jeder Bot für sich.</div>
+  <div id="tabs"></div>
+  <div id="frames"></div>
+  <script src="__shell.js" type="module"></script>
+</body>
+</html>

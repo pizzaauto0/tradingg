@@ -1,5 +1,5 @@
 // Steuerung: Konfiguration, Zustand, Durchlauf (Tick) und alle Aktionen, die das Popup auslösen kann.
-import { DEFAULTS, mergeConfig, validateConfig, symbolOf } from "./config.js";
+import { BOTS, BOT_IDS, DEFAULT_BOT, DEFAULTS, botAssets, botDefaults, mergeConfig, validateConfig, symbolOf } from "./config.js";
 import { ema } from "./indicators.js";
 import { getLocal, setLocal, appendTrade } from "./store.js";
 import { Engine } from "./engine.js";
@@ -14,12 +14,52 @@ import { HELP, formatStatus, pollCommands } from "./telegram.js";
 let current = null; // laufender Durchlauf (Promise) – es läuft nie mehr als einer gleichzeitig
 export async function whenIdle() { while (current) await current; }
 
-export async function loadConfig() { return validateConfig(mergeConfig(DEFAULTS, await getLocal("config", {}))); }
-const stateKey = (cfg) => `botState_${cfg.liveTrading ? "live" : "paper"}`;
-const defaultState = () => ({ enabled: false, approved: [], report: [], positions: {} });
-export async function loadState(cfg) { return { ...defaultState(), ...(await getLocal(stateKey(cfg), {})) }; }
+// ---- Bots ---------------------------------------------------------------------------------------------------------
+// Drei Bots (Währungen, Silber & Gold, Krypto) mit eigenen Märkten, Strategien, Positionen und Einstellungen, aber EINEM gemeinsamen
+// Paper-Konto (Bargeld) und gemeinsamen Zugangsdaten (Telegram, LLM). Ohne Angabe gilt der Krypto-Bot mit den alten Speicherschlüsseln,
+// so bleiben vorhandene Daten und der Betrieb der Erweiterung unverändert. Live-Handel (Solana-Wallet) gibt es nur für Krypto.
+const isDefault = (botId) => botId === DEFAULT_BOT;
+const cfgKey = (botId) => (isDefault(botId) ? "config" : `config_${botId}`);
+const SHARED = ["capital", "telegram", "llm"];
+const pick = (o, keys) => Object.fromEntries(keys.filter((k) => k in (o || {})).map((k) => [k, o[k]]));
+export const botOf = (msg) => (BOT_IDS.includes(msg?.bot) ? msg.bot : DEFAULT_BOT);
 
-export async function saveConfig(patch) {
+export async function loadConfig(botId = DEFAULT_BOT) {
+  const main = validateConfig(mergeConfig(DEFAULTS, await getLocal("config", {})));
+  if (isDefault(botId)) return main;
+  const own = mergeConfig(botDefaults(botId), await getLocal(cfgKey(botId), {}));
+  return validateConfig({ ...own, liveTrading: false, ...pick(main, SHARED), solana: main.solana });
+}
+const stateKey = (cfg, botId = DEFAULT_BOT) => (isDefault(botId) ? `botState_${cfg.liveTrading ? "live" : "paper"}` : `botState_${botId}`);
+const defaultState = () => ({ enabled: false, approved: [], report: [], positions: {} });
+export async function loadState(cfg, botId = DEFAULT_BOT) { return { ...defaultState(), ...(await getLocal(stateKey(cfg, botId), {})) }; }
+
+// Gemeinsames Paper-Konto: Bargeld + Positionswert je Bot. Beim ersten Mal wird das bisherige Guthaben des Krypto-Bots übernommen.
+export async function loadAccount(cfg) {
+  let acc = await getLocal("paperAccount", null);
+  if (!acc) acc = { cash: (await getLocal("botState_paper", {})).paper?.cash ?? cfg.capital.start, values: {} };
+  acc.values ||= {};
+  return acc;
+}
+const saveAccount = (acc) => setLocal("paperAccount", acc);
+
+export async function saveConfig(patch, botId = DEFAULT_BOT) {
+  if (!isDefault(botId)) {
+    const shared = pick(patch, SHARED);
+    if (Object.keys(shared).length) await saveConfig(shared, DEFAULT_BOT); // Kapital, Telegram, LLM gelten für alle Bots
+    const prev = await loadConfig(botId);
+    const own = { ...mergeConfig(prev, Object.fromEntries(Object.entries(patch).filter(([k]) => !SHARED.includes(k) && k !== "liveTrading" && k !== "solana"))), liveTrading: false };
+    const next = validateConfig(own);
+    const bad = next.assets.filter((a) => !botAssets(botId).includes(a));
+    if (bad.length) throw new Error(`assets: ${bad.join(", ")} gehört nicht zum Bot „${BOTS[botId].label}“ (erlaubt: ${botAssets(botId).join(", ")}).`);
+    await setLocal(cfgKey(botId), next);
+    if (JSON.stringify(next.backtest) !== JSON.stringify(prev.backtest)) {
+      const st = await loadState(next, botId);
+      Object.assign(st, { approved: [], report: [], lastRefresh: null });
+      await setLocal(stateKey(next, botId), st);
+    }
+    return loadConfig(botId);
+  }
   const prev = await loadConfig();
   const next = validateConfig(mergeConfig(DEFAULTS, mergeConfig(prev, patch)));
   if (next.liveTrading && !(await hasVault())) throw new Error("Für den Live-Modus zuerst eine Wallet anlegen oder importieren.");
@@ -38,24 +78,25 @@ export async function saveConfig(patch) {
 
 // ---- Benachrichtigungen / Protokoll ------------------------------------------------------------------------------
 let lastNoticeAt = 0;
-async function pushLog(text) {
+async function pushLog(text, botId = DEFAULT_BOT) {
   const log = await getLocal("eventLog", []);
-  log.push({ ts: new Date().toISOString(), text });
+  log.push({ ts: new Date().toISOString(), text, bot: botId });
   await setLocal("eventLog", log.slice(-100));
 }
 
-export function makeNotifier(cfg, fetchFn = fetch) {
+export function makeNotifier(cfg, fetchFn = fetch, botId = DEFAULT_BOT) {
+  const tag = isDefault(botId) ? "" : `[${BOTS[botId].label}] `;
   return async (text) => {
-    console.info("NOTIFY:", text);
-    await pushLog(text);
+    console.info("NOTIFY:", tag + text);
+    await pushLog(text, botId);
     if (/^(WARNUNG|NOT-AUS|ENTRY|EXIT|Tagesverlust)/.test(text) && globalThis.chrome?.notifications) {
-      chrome.notifications.create({ type: "basic", iconUrl: "icons/icon128.png", title: `Trading-Bot [${cfg.liveTrading ? "LIVE" : "PAPER"}]`, message: text.slice(0, 250) });
+      chrome.notifications.create({ type: "basic", iconUrl: "icons/icon128.png", title: `Trading-Bot [${cfg.liveTrading ? "LIVE" : "PAPER"}]`, message: (tag + text).slice(0, 250) });
     }
     if (cfg.telegram.enabled && cfg.telegram.token && cfg.telegram.chatId) {
       try {
         await fetchFn(`https://api.telegram.org/bot${cfg.telegram.token}/sendMessage`, { method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ chat_id: cfg.telegram.chatId, text: `[${cfg.liveTrading ? "LIVE" : "PAPER"}] ${text}`.slice(0, 4000) }) });
+          body: JSON.stringify({ chat_id: cfg.telegram.chatId, text: `[${cfg.liveTrading ? "LIVE" : "PAPER"}] ${tag}${text}`.slice(0, 4000) }) });
       } catch { /* Telegram-Fehler dürfen den Bot nie stoppen */ }
     }
   };
@@ -64,23 +105,39 @@ export function makeNotifier(cfg, fetchFn = fetch) {
 // ---- Ein Durchlauf (vom Alarm alle 30 s aufgerufen) ----------------------------------------------------------------
 export function runTick(opts = {}) {
   if (current) return current.then(() => {}, () => {}); // läuft schon einer: dieser Aufruf wird übersprungen
-  current = tickOnce(opts).finally(() => { current = null; });
+  current = tickAll(opts).finally(() => { current = null; });
   return current;
 }
 
-async function tickOnce({ fetchFn = fetch, now = new Date() } = {}) {
-  let cfg, state;
+// Alle Bots nacheinander (sie teilen sich das Paper-Konto, deshalb nie gleichzeitig). Ein Fehler in einem Bot stoppt die anderen nicht.
+async function tickAll(opts) {
+  for (const id of BOT_IDS) await tickOnce(id, opts);
+}
+
+// Engine eines Bots; Paper: mit dem gemeinsamen Konto, das nach jedem Speichern mitgeschrieben wird.
+function makeEngine(botId, cfg, state, account, broker, fetchFn, notify, refresher) {
+  return new Engine({
+    cfg, state, broker, notify, botId,
+    fetchRecent: (symbol) => fetchRecent(cfg, symbol, fetchFn),
+    logTrade: (row) => appendTrade({ ...row, bot: botId }),
+    save: async () => { await setLocal(stateKey(cfg, botId), state); if (account) await saveAccount(account); },
+    refresher,
+  });
+}
+
+async function tickOnce(botId, { fetchFn = fetch, now = new Date() } = {}) {
+  let cfg, state, account = null;
   try {
-    cfg = await loadConfig();
-    state = await loadState(cfg);
+    cfg = await loadConfig(botId);
+    state = await loadState(cfg, botId);
     if (!state.enabled && !state.killRequested) return;
-    const notify = makeNotifier(cfg, fetchFn);
+    const notify = makeNotifier(cfg, fetchFn, botId);
     let broker;
     if (cfg.liveTrading) {
       const key = await getUnlockedKey();
       if (!key) {
         state.locked = true;
-        await setLocal(stateKey(cfg), state);
+        await setLocal(stateKey(cfg, botId), state);
         if (Date.now() - lastNoticeAt > 30 * 60_000) {
           lastNoticeAt = Date.now();
           const open = Object.keys(state.positions).length ? " ACHTUNG: Position offen und ohne Überwachung!" : "";
@@ -91,25 +148,21 @@ async function tickOnce({ fetchFn = fetch, now = new Date() } = {}) {
       state.locked = false;
       broker = new SolanaWallet(cfg, key, fetchFn);
     } else {
-      broker = new PaperBroker(cfg, state);
+      account = await loadAccount(cfg);
+      broker = new PaperBroker(cfg, state, account);
     }
-    const engine = new Engine({
-      cfg, state, broker, notify,
-      fetchRecent: (symbol) => fetchRecent(cfg, symbol, fetchFn),
-      logTrade: appendTrade,
-      save: () => setLocal(stateKey(cfg), state),
-      refresher: () => researchAndBacktest(cfg, fetchFn),
-    });
+    const engine = makeEngine(botId, cfg, state, account, broker, fetchFn, notify, () => researchAndBacktest(cfg, fetchFn));
     await engine.tick(now);
     state.lastError = null;
     state.lastTick = now.toISOString();
-    await setLocal(stateKey(cfg), state);
+    await setLocal(stateKey(cfg, botId), state);
+    if (account) await saveAccount(account);
   } catch (e) {
     console.error(e);
     if (state) {
       state.lastError = `${e.message}`;
-      await setLocal(stateKey(cfg), state);
-      if (Date.now() - lastNoticeAt > 10 * 60_000) { lastNoticeAt = Date.now(); await makeNotifier(cfg, fetchFn)(`WARNUNG: Fehler im Durchlauf: ${e.message}`); }
+      await setLocal(stateKey(cfg, botId), state);
+      if (Date.now() - lastNoticeAt > 10 * 60_000) { lastNoticeAt = Date.now(); await makeNotifier(cfg, fetchFn, botId)(`WARNUNG: Fehler im Durchlauf: ${e.message}`); }
     }
   }
 }
@@ -124,13 +177,18 @@ export async function pollTelegram(fetchFn = fetch) {
       setOffset: (n) => setLocal("tgOffset", n),
       run: async (cmd, args) => {
         try {
-          if (cmd === "/status") return formatStatus(await getStatus());
-          if (cmd === "/stop") { await handle({ type: "stop" }, fetchFn); return "Handel gestoppt. Offene Positionen bleiben mit ihren Stops bestehen. Starten geht nur im Browser."; }
+          if (cmd === "/status") {
+            const a = await getAccount(), lines = [`Paper-Konto (gemeinsam): Eigenkapital ${a.equity.toFixed(2)} USD (${a.pnl >= 0 ? "+" : ""}${a.pnlPct.toFixed(2)} %), Bargeld ${a.cash.toFixed(2)} USD`];
+            for (const id of BOT_IDS) lines.push(`— ${BOTS[id].label} —`, formatStatus(await getStatus(id)));
+            return lines.join("\n");
+          }
+          if (cmd === "/stop") { await handle({ type: "stopAll" }, fetchFn); return "Handel aller Bots gestoppt. Offene Positionen bleiben mit ihren Stops bestehen. Starten geht nur in der App/im Browser."; }
           if (cmd === "/kill") {
-            if (args[0]?.toLowerCase() !== "ja") return "NOT-AUS schließt ALLE Positionen und stoppt den Bot. Zum Bestätigen schreibe:\n/kill ja";
-            await handle({ type: "kill" }, fetchFn);
-            const left = Object.keys((await getStatus()).state.positions);
-            return left.length ? `NOT-AUS: nicht geschlossen: ${left.join(", ")} – bitte im Browser/Wallet prüfen!` : "NOT-AUS ausgeführt: keine offene Position, Bot gestoppt.";
+            if (args[0]?.toLowerCase() !== "ja") return "NOT-AUS schließt ALLE Positionen aller Bots und stoppt sie. Zum Bestätigen schreibe:\n/kill ja";
+            await handle({ type: "killAll" }, fetchFn);
+            const left = [];
+            for (const id of BOT_IDS) left.push(...Object.keys((await getStatus(id)).state.positions));
+            return left.length ? `NOT-AUS: nicht geschlossen: ${left.join(", ")} – bitte in der App/Wallet prüfen!` : "NOT-AUS ausgeführt: keine offene Position, alle Bots gestoppt.";
           }
           return HELP; // /help, /start (Telegram-Standard) und alles Unbekannte
         } catch (e) {
@@ -146,50 +204,85 @@ export async function pollTelegram(fetchFn = fetch) {
 // ---- Aktionen aus dem Popup --------------------------------------------------------------------------------------
 const maskSecrets = (cfg) => ({ ...cfg, llm: { ...cfg.llm, apiKey: cfg.llm.apiKey ? "***" : "" }, telegram: { ...cfg.telegram, token: cfg.telegram.token ? "***" : "" } });
 
-export async function getStatus() {
-  const cfg = await loadConfig(), state = await loadState(cfg);
+const ownRow = (botId) => (t) => (t.bot || DEFAULT_BOT) === botId;
+
+export async function getStatus(botId = DEFAULT_BOT) {
+  const cfg = await loadConfig(botId), state = await loadState(cfg, botId);
   const safeCfg = maskSecrets(cfg);
+  const account = cfg.liveTrading ? null : await loadAccount(cfg);
   return {
+    bot: botId, botLabel: BOTS[botId].label,
     cfg: safeCfg,
     state: { enabled: state.enabled, killRequested: !!state.killRequested, locked: !!state.locked, pending: state.pending || null,
-      positions: state.positions, risk: state.risk || {}, paperCash: state.paper?.cash ?? null, approved: state.approved,
+      positions: state.positions, risk: state.risk || {}, paperCash: account ? account.cash : (state.paper?.cash ?? null), approved: state.approved,
       report: state.report, problems: state.problems || [], activity: state.activity || {}, decisions: (state.decisions || []).slice(-10).reverse(), status: state.status || null, lastRefresh: state.lastRefresh || null, lastTick: state.lastTick || null, lastError: state.lastError || null },
     vault: { exists: await hasVault(), address: await vaultAddress(), unlocked: !!(await getUnlockedKey()) },
-    trades: (await getLocal("trades", [])).slice(-50).reverse(),
-    events: (await getLocal("eventLog", [])).slice(-30).reverse(),
+    trades: (await getLocal("trades", [])).filter(ownRow(botId)).slice(-50).reverse(),
+    events: (await getLocal("eventLog", [])).filter(ownRow(botId)).slice(-30).reverse(),
   };
 }
 
+// Das gemeinsame Paper-Konto und die Lage der drei Bots (für die Kopfzeile der App).
+export async function getAccount() {
+  const main = await loadConfig(), acc = await loadAccount(main);
+  const bots = [];
+  let held = 0;
+  for (const id of BOT_IDS) {
+    const cfg = await loadConfig(id), st = await loadState(cfg, id);
+    const own = Object.values(st.positions).reduce((x, p) => x + p.amount * (st.activity?.[p.symbol]?.price ?? p.entryPrice), 0);
+    const value = id === DEFAULT_BOT && main.liveTrading ? 0 : own; // Live-Krypto liegt in der Wallet, nicht im Paper-Konto
+    held += value;
+    bots.push({ id, label: BOTS[id].label, enabled: st.enabled, positions: Object.keys(st.positions).length, value, killRequested: !!st.killRequested,
+      pending: !!st.pending, locked: !!st.locked, lastTick: st.lastTick || null, lastError: st.lastError || null, live: id === DEFAULT_BOT && main.liveTrading,
+      halted: !!st.risk?.halted, approvedActive: st.approved.filter((a) => a.active).length });
+  }
+  const equity = acc.cash + held;
+  return { capital: main.capital.start, cash: acc.cash, held, equity, pnl: equity - main.capital.start, pnlPct: (equity / main.capital.start - 1) * 100, bots };
+}
+
 export async function handle(msg, fetchFn = fetch) {
-  const cfg = await loadConfig();
+  const botId = botOf(msg);
+  const cfg = await loadConfig(botId);
   switch (msg.type) {
-    case "getStatus": return getStatus();
-    case "saveConfig": return saveConfig(msg.patch);
+    case "getStatus": return getStatus(botId);
+    case "getAccount": return getAccount();
+    case "saveConfig": return saveConfig(msg.patch, botId);
     case "getConfig": return maskSecrets(cfg);
+    case "startAll": { for (const id of BOT_IDS) await handle({ type: "start", bot: id }, fetchFn).catch(() => {}); return true; }
+    case "stopAll": { for (const id of BOT_IDS) await handle({ type: "stop", bot: id }, fetchFn); return true; }
+    case "killAll": {
+      for (const id of BOT_IDS) { const c = await loadConfig(id), st = await loadState(c, id); st.killRequested = true; await setLocal(stateKey(c, id), st); }
+      await whenIdle();
+      await runTick({ fetchFn });
+      return true;
+    }
+    case "resetAccount": { // Paper-Konto auf das Startkapital zurücksetzen (nur ohne offene Positionen)
+      for (const id of BOT_IDS) { const c = await loadConfig(id); if (Object.keys((await loadState(c, id)).positions).length) throw new Error("Zurücksetzen nur ohne offene Positionen."); }
+      await saveAccount({ cash: cfg.capital.start, values: {} });
+      return true;
+    }
     case "start": {
       if (cfg.liveTrading && !(await getUnlockedKey())) throw new Error("Wallet zuerst entsperren.");
-      const st = await loadState(cfg);
+      const st = await loadState(cfg, botId);
       if (st.killRequested) throw new Error("Not-Aus ist noch aktiv – Position erst schließen/prüfen.");
       st.enabled = true;
-      await setLocal(stateKey(cfg), st);
+      await setLocal(stateKey(cfg, botId), st);
       runTick({ fetchFn }); // im Hintergrund, blockiert das Popup nicht
       return true;
     }
     case "testTrade": {
       if (cfg.liveTrading) throw new Error("Testtrade ist nur im Paper-Modus erlaubt.");
       await whenIdle();
-      const state = await loadState(cfg);
-      const engine = new Engine({
-        cfg, state, broker: new PaperBroker(cfg, state), notify: makeNotifier(cfg, fetchFn),
-        fetchRecent: (symbol) => fetchRecent(cfg, symbol, fetchFn), logTrade: appendTrade,
-        save: () => setLocal(stateKey(cfg), state), refresher: async () => { throw new Error("nicht benötigt"); },
-      });
+      const state = await loadState(cfg, botId), account = await loadAccount(cfg);
+      const engine = makeEngine(botId, cfg, state, account, new PaperBroker(cfg, state, account), fetchFn, makeNotifier(cfg, fetchFn, botId),
+        async () => { throw new Error("nicht benötigt"); });
       const sym = await engine.testEntry(new Date());
-      await setLocal(stateKey(cfg), state);
+      await setLocal(stateKey(cfg, botId), state);
+      await saveAccount(account);
       return sym;
     }
     case "chart": { // Daten für das Dashboard: Kerzen, Durchschnitte, Position, Aktivität
-      const st = await loadState(cfg);
+      const st = await loadState(cfg, botId);
       const sym = msg.symbol || Object.keys(st.positions)[0] || symbolOf(cfg.assets[0]);
       const df = await fetchRecent(cfg, sym, fetchFn), n = df.t.length, from = Math.max(0, n - (msg.bars || 160));
       const e20 = ema(df.close, 20), e50 = ema(df.close, 50), cut = (a) => a.slice(from);
@@ -197,25 +290,25 @@ export async function handle(msg, fetchFn = fetch) {
         ema20: cut(e20), ema50: cut(e50), position: st.positions[sym] || null, positions: st.positions, activity: st.activity || {},
         decisions: (st.decisions || []).slice(-15).reverse(), symbols: cfg.assets.map(symbolOf), enabled: st.enabled, paper: !cfg.liveTrading,
         trades: (await getLocal("trades", [])).filter((t) => t.symbol === sym).slice(-30),
-        risk: st.risk || {}, cash: st.paper?.cash ?? null, maxPositions: cfg.risk.maxOpenPositions };
+        risk: st.risk || {}, cash: cfg.liveTrading ? null : (await loadAccount(cfg)).cash, maxPositions: cfg.risk.maxOpenPositions };
     }
     case "tickNow": await whenIdle(); await runTick({ fetchFn }); return true;
-    case "stop": { const st = await loadState(cfg); st.enabled = false; await setLocal(stateKey(cfg), st); return true; }
+    case "stop": { const st = await loadState(cfg, botId); st.enabled = false; await setLocal(stateKey(cfg, botId), st); return true; }
     case "kill": {
-      const st = await loadState(cfg);
+      const st = await loadState(cfg, botId);
       st.killRequested = true;
-      await setLocal(stateKey(cfg), st);
+      await setLocal(stateKey(cfg, botId), st);
       await whenIdle(); // einen gerade laufenden Durchlauf abwarten, dann sofort den Not-Aus ausführen
       await runTick({ fetchFn });
       return true;
     }
-    case "clearKill": { const st = await loadState(cfg); st.killRequested = false; await setLocal(stateKey(cfg), st); return true; }
-    case "clearPending": { const st = await loadState(cfg); st.pending = null; await setLocal(stateKey(cfg), st); return true; }
+    case "clearKill": { const st = await loadState(cfg, botId); st.killRequested = false; await setLocal(stateKey(cfg, botId), st); return true; }
+    case "clearPending": { const st = await loadState(cfg, botId); st.pending = null; await setLocal(stateKey(cfg, botId), st); return true; }
     case "research": {
       const res = await researchAndBacktest(cfg, fetchFn);
-      const st = await loadState(cfg);
+      const st = await loadState(cfg, botId);
       Object.assign(st, { approved: res.approved, report: res.report, problems: res.problems || [], lastRefresh: new Date().toISOString() });
-      await setLocal(stateKey(cfg), st);
+      await setLocal(stateKey(cfg, botId), st);
       const d = summarizeFailures(res.report);
       return { approved: res.approved.length, active: res.approved.filter((a) => a.active).length, tested: res.report.length, candles: res.candles,
         problems: res.problems, markets: [...new Set(res.report.map((r) => r.symbol))].length, topReasons: d.byReason.slice(0, 3), profitable: d.profitable, highWin: d.highWin };

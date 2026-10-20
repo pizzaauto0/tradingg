@@ -23,9 +23,17 @@ export class Engine {
     this.exitedThisTick = new Set();
   }
 
+  // Eigenkapital = Bargeld + Wert der eigenen Positionen + (bei gemeinsamem Paper-Konto) Wert der Positionen der anderen Bots.
+  // Den eigenen Positionswert merkt sich das Konto, damit die anderen Bots ihn kennen.
   async equity() {
-    let v = await this.broker.cash();
-    for (const [sym, p] of Object.entries(this.state.positions)) v += p.amount * (this.lastPrices[sym] ?? p.entryPrice);
+    let own = 0;
+    for (const [sym, p] of Object.entries(this.state.positions)) own += p.amount * (this.lastPrices[sym] ?? p.entryPrice);
+    let v = (await this.broker.cash()) + own;
+    const values = this.broker.s?.values;
+    if (values && this.botId) {
+      values[this.botId] = own;
+      for (const [id, x] of Object.entries(values)) if (id !== this.botId) v += x;
+    }
     return v;
   }
 
