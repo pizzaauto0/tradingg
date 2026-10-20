@@ -20,6 +20,7 @@ async function refresh() {
   try {
     data = await call("chart", { symbol: selected, bars: 160 });
     selected = data.symbol;
+    if (document.activeElement?.matches?.("#panels input")) return draw();   // beim Tippen nicht die Eingabefelder neu aufbauen
     render();
   } catch (e) { $("head").replaceChildren(h("div", { class: "error" }, `Fehler: ${e.message}`)); }
 }
@@ -59,6 +60,7 @@ function render() {
       h("div", { class: "row muted" }, h("span", {}, "Stop"), h("span", {}, `Kurs ${fmt(price)}`), h("span", {}, "Ziel")),
       h("div", { class: "hint" }, pos.reason)));
   }
+  panels.unshift(tradePanel(pos, price));
   panels.push(h("div", { class: "card" }, h("h3", {}, `Signal-Matrix · ${selected}`),
     (a.checks || []).length ? h("table", {}, h("tr", {}, h("th", {}, "Strategie"), h("th", {}, "passt zur Phase"), h("th", {}, "Einstiegssignal")),
       ...a.checks.map((c) => h("tr", {}, h("td", {}, c.name), h("td", {}, c.fits ? "ja" : "nein"), h("td", { class: `sig ${c.signal ? "y" : "n"}` }, c.signal ? "JA" : "nein"))))
@@ -68,8 +70,57 @@ function render() {
     data.decisions.length ? h("table", {}, ...data.decisions.map((d) => h("tr", {}, h("td", { class: "muted" }, new Date(d.ts).toLocaleTimeString("de-DE")), h("td", {}, d.text.replace(/^.*? · /, "")))))
       : h("p", { class: "muted" }, "Noch keine geprüfte Kerze."),
     h("div", { class: "hint" }, `Positionen ${Object.keys(positions).length}/${data.maxPositions}${data.cash != null ? ` · Paper-Kasse ${fmt(data.cash)} USD` : ""}`)));
+  panels.push(tradesCard());
   $("panels").replaceChildren(...panels);
   draw();
+}
+// ---- Handeln: kaufen, verkaufen, Stop-Loss/Take-Profit verschieben, KI-Trailing ----
+const form = { usd: "", stop: "", tp: "", pstop: "", ptp: "" };
+const field = (label, key, placeholder, step = "any") => h("label", { class: "fld" }, label,
+  h("input", { type: "number", step, placeholder, value: form[key], oninput: (e) => { form[key] = e.target.value; } }));
+async function doAct(fn, ok) {
+  try { const r = await fn(); alert(typeof r === "string" ? r : ok); } catch (e) { alert(e.message); }
+  form.pstop = form.ptp = ""; refresh();
+}
+
+function tradePanel(pos, price) {
+  const t = data.trail, c = data.costs, fx = (x) => (x == null ? "" : String(Number(x.toPrecision(7))));
+  if (!pos) {
+    return h("div", { class: "card" }, h("h3", {}, `Handeln · ${selected}`),
+      data.manualBuy ? h("div", {}, h("div", { class: "form2" }, field("Betrag (USD)", "usd", "leer = nach Risikoregel"), field("Stop-Loss (Kurs)", "stop", "leer = 2×ATR unter Kurs"), field("Take-Profit (Kurs)", "tp", "leer = Regel")),
+        h("div", { class: "btns" }, h("button", { class: "btn primary", onclick: () => {
+          if (!confirm(`${selected} jetzt zum Marktpreis ${fmt(price)} kaufen (Paper, Spielgeld)?`)) return;
+          doAct(() => call("buy", { symbol: selected, usd: form.usd, stop: form.stop, takeProfit: form.tp }), "Gekauft."); } }, "🟢 Kaufen")),
+        h("div", { class: "hint" }, `Gebühren und Rutschen werden eingerechnet (je Order ${(c.feePct + c.slippagePct).toFixed(2)} %). Harte Grenzen: höchstens 2 % Risiko, ${data.maxPositionPct} % des Kapitals je Position, Positionslimit.`))
+        : h("p", { class: "muted" }, "Manueller Kauf gibt es nur im Paper-Modus."));
+  }
+  const unit = price - pos.entryPrice, profit = unit * pos.amount, costFrac = (2 * (c.feePct + c.slippagePct)) / 100;
+  const set = (stop) => () => doAct(() => call("adjust", { symbol: selected, stop }), "Stop-Loss gesetzt.");
+  return h("div", { class: "card" }, h("h3", {}, `Handeln · ${selected}`),
+    h("div", { class: "row" }, h("span", { class: "muted" }, "Gewinn jetzt (vor Gebühren)"), h("span", { class: profit >= 0 ? "ok" : "bad" }, `${sign(profit)} USD`)),
+    h("div", { class: "btns" }, h("button", { class: "btn danger", onclick: () => {
+      if (!confirm(`${selected} jetzt zum Marktpreis ${fmt(price)} verkaufen? Ergebnis ca. ${sign(profit)} USD vor Gebühren.`)) return;
+      doAct(() => call("sell", { symbol: selected }), "Verkauft."); } }, "🔴 Jetzt verkaufen")),
+    h("div", { class: "form2" }, field(`Stop-Loss (jetzt ${fmt(pos.stop)})`, "pstop", fx(pos.stop)), field(`Take-Profit (jetzt ${fmt(pos.takeProfit)})`, "ptp", fx(pos.takeProfit))),
+    h("div", { class: "btns" },
+      h("button", { class: "btn", onclick: () => doAct(() => call("adjust", { symbol: selected, stop: form.pstop, takeProfit: form.ptp }), "Gesetzt.") }, "Stop/Ziel setzen"),
+      unit > 0 && h("button", { class: "btn", title: "Stop auf Einstand plus Kosten – ein Ausstoppen kostet dann nichts", onclick: set(pos.entryPrice * (1 + costFrac)) }, "Stop → Einstand"),
+      unit > 0 && h("button", { class: "btn", onclick: set(pos.entryPrice + unit * 0.5) }, "Stop sichert 50 %"),
+      unit > 0 && h("button", { class: "btn", onclick: set(pos.entryPrice + unit * 0.75) }, "Stop sichert 75 %")),
+    h("label", { class: "fld chk" }, h("input", { type: "checkbox", checked: !pos.trailOff && t.enabled, disabled: !t.enabled, onchange: (e) => doAct(() => call("adjust", { symbol: selected, trailOff: !e.target.checked }), "Gesetzt.") }),
+      ` KI-Trailing für diese Position${t.enabled ? "" : " (in den Einstellungen ausgeschaltet)"}`),
+    h("div", { class: "hint" }, `KI-Trailing: ab ${t.startUsd} USD Gewinn oder ${t.startR}×Risiko zieht der Bot den Stop-Loss nach (Basis: ${Math.round(t.lockFraction * 100)} % des Gewinns sichern, z. B. bei +${t.startUsd} → Stop bei +${(t.startUsd * t.lockFraction).toFixed(0)}); je nach Marktphase mehr (Seitwärts/Abwärts) oder weniger (starker Aufwärtstrend). Bei starkem Trend nahe am Ziel hebt er auch das Ziel an. Nie unter Einstand + Kosten, nie näher als 0,5 ATR am Kurs, nur nach oben.`),
+    (pos.history || []).length ? h("div", { class: "decisions" }, h("strong", {}, "Verlauf der Anpassungen:"), ...pos.history.slice(-8).reverse().map((e) =>
+      h("div", {}, h("span", { class: "muted" }, new Date(e.ts).toLocaleTimeString("de-DE") + " "), `${e.by}: ${e.kind === "stop" ? "Stop-Loss" : "Take-Profit"} ${fmt(e.from)} → ${fmt(e.to)}${e.why ? " – " + e.why : ""}`))) : null);
+}
+
+function tradesCard() {
+  const rows = (data.trades || []).filter((tr) => tr.action !== "STOP").slice(-12).reverse();
+  return h("div", { class: "card" }, h("h3", {}, `Käufe & Verkäufe · ${selected}`),
+    rows.length ? h("table", {}, h("tr", {}, ...["Zeit", "", "Preis", "Menge", "Ergebnis (netto)"].map((x) => h("th", {}, x))),
+      ...rows.map((tr) => h("tr", {}, h("td", { class: "muted" }, new Date(tr.ts).toLocaleString("de-DE")), h("td", { class: tr.action === "ENTRY" ? "ok" : "bad" }, tr.action === "ENTRY" ? "Kauf" : "Verkauf"),
+        h("td", {}, fmt(tr.price)), h("td", {}, fmt(tr.amount, 5)), h("td", { class: tr.pnl == null ? "" : tr.pnl >= 0 ? "ok" : "bad" }, tr.pnl == null ? "–" : `${sign(tr.pnl)} USD`))))
+      : h("p", { class: "muted" }, "Noch keine Trades in diesem Markt."));
 }
 const row = (k, v, cls = "") => h("div", { class: "row" }, h("span", { class: "muted" }, k), h("span", { class: cls }, v));
 

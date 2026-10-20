@@ -4,6 +4,7 @@ import { buildStrategy } from "./strategies.js";
 import { positionSize, RiskManager, stopAndTarget } from "./risk.js";
 import { selectStrategy } from "./pipeline.js";
 import { fmtPx, timeframeSeconds } from "./util.js";
+import { planTrail } from "./trail.js";
 import { symbolOf } from "./config.js";
 
 const MIN_NOTIONAL_USD = 5;
@@ -76,7 +77,7 @@ export class Engine {
     // 2) Offene Positionen verwalten (Stop, Ziel, Ausstiegssignal)
     if (this.broker.mode === "live" && Object.keys(state.positions).length) await this.reconcile();
     this.risk.rollDay(now, await this.equity());
-    for (const [sym, d] of Object.entries(data)) await this.managePosition(sym, d, now);
+    for (const [sym, d] of Object.entries(data)) { await this.managePosition(sym, d, now); await this.manageTrail(sym, d, now); }
 
     // 3) Tageslimit über alle Märkte
     const equity = await this.equity();
@@ -139,7 +140,8 @@ export class Engine {
     const pos = this.state.positions[sym];
     if (!pos) return;
     const price = last(live.close), tfMs = timeframeSeconds(this.cfg.timeframe) * 1000;
-    const entryCandle = Math.floor(Date.parse(pos.openedAt) / tfMs) * tfMs;
+    // Tiefstkurse zählen erst ab der Kerze nach der letzten Stop-Änderung (sonst würde ein nachgezogener Stop von alten Tiefs „getroffen“)
+    const entryCandle = Math.floor(Date.parse(pos.stopChangedAt || pos.openedAt) / tfMs) * tfMs;
     let low = price;
     for (let i = 0; i < live.t.length; i++) if (live.t[i] > entryCandle) low = Math.min(low, live.low[i]);
 
@@ -153,9 +155,120 @@ export class Engine {
     }
     if (fill) return this.recordExit(pos, fill, `Stop-Loss bei ${pos.stop.toFixed(2)} ausgelöst`, now);
     if (price >= pos.takeProfit) return this.close(pos, price, `Take-Profit ${pos.takeProfit.toFixed(2)} erreicht`, now);
-    if (isNew && buildStrategy(pos.strategySpec).exit(closed).at(-1)) {
+    if (isNew && pos.strategySpec && buildStrategy(pos.strategySpec).exit(closed).at(-1)) {
       return this.close(pos, price, `Ausstiegssignal der Strategie ${pos.strategyName}`, now);
     }
+  }
+
+  // ---- Stop/Ziel nachziehen (KI-Trailing) und manuelle Eingriffe ----
+  recordAdjust(pos, kind, from, to, why, now, by) {
+    (pos.history ||= []).push({ ts: now.toISOString(), kind, from, to, by, why });
+    pos.history = pos.history.slice(-30);
+    if (kind === "stop") pos.stopChangedAt = now.toISOString();
+  }
+
+  async manageTrail(sym, { closed, live }, now) {
+    const pos = this.state.positions[sym];
+    if (!pos || !this.cfg.trail?.enabled || pos.trailOff) return;
+    const price = last(live.close), atrValue = last(atr(closed, this.cfg.risk.atrPeriod));
+    let market = null;
+    try { market = classifyMarket(closed); } catch { /* ohne Marktphase: vorsichtig sichern */ }
+    const costFrac = (2 * (this.cfg.costs.feePct + this.cfg.costs.slippagePct)) / 100;
+    const plan = planTrail(pos, price, atrValue, market, this.cfg.trail, costFrac);
+    if (!plan) return;
+    const parts = [];
+    if (plan.stop != null) {
+      const old = pos.stop; pos.stop = plan.stop;
+      this.recordAdjust(pos, "stop", old, plan.stop, plan.why.join("; "), now, "KI");
+      parts.push(`Stop-Loss ${fmtPx(old)} → ${fmtPx(plan.stop)} (sichert ${plan.lockedUsd >= 0 ? "+" : ""}${plan.lockedUsd.toFixed(2)} USD vor Gebühren)`);
+      await this.logTrade({ ts: now.toISOString(), mode: this.broker.mode, symbol: sym, action: "STOP", price: plan.stop, amount: pos.amount, fee: 0, pnl: null, strategy: pos.strategyName, regime: pos.regime, reason: `KI-Trailing: ${plan.why.join("; ")}`, equity: await this.equity() });
+    }
+    if (plan.takeProfit != null) {
+      const old = pos.takeProfit; pos.takeProfit = plan.takeProfit; pos.tpExtensions = (pos.tpExtensions || 0) + 1;
+      this.recordAdjust(pos, "tp", old, plan.takeProfit, plan.why.join("; "), now, "KI");
+      parts.push(`Take-Profit ${fmtPx(old)} → ${fmtPx(plan.takeProfit)}`);
+    }
+    await this.save();
+    await this.notify(`TRAIL ${sym}: ${parts.join(" | ")} | aktueller Gewinn ${plan.profit >= 0 ? "+" : ""}${plan.profit.toFixed(2)} USD, Kurs ${fmtPx(price)}\nWarum: ${plan.why.join("; ")}`);
+  }
+
+  async freshPrice(sym) {
+    const live = await this.fetchRecent(sym), price = last(live.close);
+    this.lastPrices[sym] = price;
+    this.broker.hintPrices?.(this.lastPrices);
+    return { live, price, closed: sliceFrame(live, 0, live.t.length - 1) };
+  }
+
+  // Manuell: Stop-Loss/Take-Profit einer offenen Position setzen (nach oben ODER unten – eigene Entscheidung) und/oder das KI-Trailing für sie ein-/ausschalten.
+  async adjustPosition(sym, { stop, takeProfit, trailOff } = {}, now = new Date()) {
+    const pos = this.state.positions[sym];
+    if (!pos) throw new Error(`${sym}: keine offene Position.`);
+    const { price } = await this.freshPrice(sym), parts = [];
+    if (stop != null) {
+      if (!(stop > 0 && stop < price)) throw new Error(`Stop-Loss muss unter dem aktuellen Kurs (${fmtPx(price)}) liegen – zum sofortigen Beenden „Verkaufen“ nutzen.`);
+      if (stop !== pos.stop) { const old = pos.stop; pos.stop = stop; this.recordAdjust(pos, "stop", old, stop, "manuell", now, "Du"); parts.push(`Stop-Loss ${fmtPx(old)} → ${fmtPx(stop)}`); }
+    }
+    if (takeProfit != null) {
+      if (!(takeProfit > price)) throw new Error(`Take-Profit muss über dem aktuellen Kurs (${fmtPx(price)}) liegen.`);
+      if (takeProfit !== pos.takeProfit) { const old = pos.takeProfit; pos.takeProfit = takeProfit; this.recordAdjust(pos, "tp", old, takeProfit, "manuell", now, "Du"); parts.push(`Take-Profit ${fmtPx(old)} → ${fmtPx(takeProfit)}`); }
+    }
+    if (trailOff != null && !!trailOff !== !!pos.trailOff) { pos.trailOff = !!trailOff; parts.push(`KI-Trailing ${pos.trailOff ? "AUS" : "AN"}`); }
+    if (!parts.length) return "Nichts geändert.";
+    await this.save();
+    const text = `${sym} manuell angepasst: ${parts.join(" | ")}`;
+    await this.notify(`STOP/ZIEL ${text}`);
+    return text;
+  }
+
+  async manualSell(sym, now = new Date()) {
+    const pos = this.state.positions[sym];
+    if (!pos) throw new Error(`${sym}: keine offene Position.`);
+    if (this.state.pending) throw new Error("Unklarer Orderstatus – erst zurücksetzen.");
+    const { price } = await this.freshPrice(sym);
+    await this.close(pos, price, "Manueller Verkauf (Dashboard)", now);
+    return `${sym} verkauft`;
+  }
+
+  // Manueller Kauf (nur Paper): usd = Betrag (sonst Größe nach Risikoregel), stop/takeProfit optional (sonst ATR-Regeln wie beim Bot). Die harten Grenzen gelten auch hier.
+  async manualBuy(sym, { usd, stop, takeProfit } = {}, now = new Date()) {
+    if (this.broker.mode === "live") throw new Error("Manueller Kauf ist nur im Paper-Modus erlaubt.");
+    if (this.state.pending) throw new Error("Unklarer Orderstatus – erst zurücksetzen.");
+    if (!this.symbols.includes(sym)) throw new Error(`${sym}: gehört nicht zu diesem Bot.`);
+    if (this.state.positions[sym]) throw new Error(`${sym}: Position ist schon offen.`);
+    const [ok, why] = this.risk.canOpen(Object.keys(this.state.positions).length);
+    if (!ok) throw new Error(`Kein Kauf möglich: ${why}`);
+    const { price, closed } = await this.freshPrice(sym);
+    if (closed.t.length < 30) throw new Error(`${sym}: zu wenige Kursdaten.`);
+    const atrValue = last(atr(closed, this.cfg.risk.atrPeriod)), r = this.cfg.risk;
+    const st = stop ?? price - atrValue * r.atrStopMult, tp = takeProfit ?? price + (price - st) * r.takeProfitRr;
+    if (!(st > 0 && st < price)) throw new Error(`Stop-Loss muss unter dem Kurs (${fmtPx(price)}) liegen.`);
+    if (!(tp > price)) throw new Error(`Take-Profit muss über dem Kurs (${fmtPx(price)}) liegen.`);
+    const equity = await this.equity(), cash = await this.broker.cash();
+    const costMul = (1 + this.cfg.costs.slippagePct / 100) * (1 + this.cfg.costs.feePct / 100);
+    const amount = floorTo(usd != null ? Math.min(usd / price, cash / (price * costMul)) : positionSize(this.risk.sizingEquity(equity), cash, price, st, r, this.cfg.costs), price > 1000 ? 6 : 5);
+    if (amount * price < MIN_NOTIONAL_USD) throw new Error(`Betrag zu klein (unter ${MIN_NOTIONAL_USD} USD oder Guthaben reicht nicht).`);
+    if (amount * price > equity * (r.maxPositionPct / 100) * 1.0001) throw new Error(`Betrag ${(amount * price).toFixed(2)} USD übersteigt die maximale Positionsgröße (${r.maxPositionPct} % des Kapitals = ${(equity * r.maxPositionPct / 100).toFixed(2)} USD).`);
+    const riskCash = amount * (price - st), riskPct = (riskCash / equity) * 100;
+    if (riskPct > 2.0001) throw new Error(`Risiko ${riskPct.toFixed(2)} % des Kapitals liegt über der harten Grenze von 2 % – Stop näher setzen oder Betrag verkleinern.`);
+    let market = null;
+    try { market = classifyMarket(closed); } catch { /* egal */ }
+    this.state.pending = { what: `Kauf ${sym}`, ts: now.toISOString() };
+    await this.save();
+    let fill;
+    try { fill = await this.broker.openLong(sym, amount, st, price); }
+    catch (e) { this.state.pending = null; await this.save(); throw e; }
+    this.state.pending = null;
+    const reason = `MANUELLER KAUF (Dashboard, nur Paper). Stop ${fmtPx(st)}${stop == null ? " (ATR-Regel)" : ""}, Ziel ${fmtPx(tp)}${takeProfit == null ? " (Regel)" : ""}; Risiko ca. ${riskCash.toFixed(2)} USD (${riskPct.toFixed(2)} % des Kapitals); wird danach nur über Stop/Ziel, KI-Trailing oder manuell beendet.`;
+    this.state.positions[sym] = { symbol: sym, amount: fill.amount, entryPrice: fill.price, stop: st, initialStop: st, takeProfit: tp, entryFee: fill.fee,
+      openedAt: now.toISOString(), strategySpec: null, strategyName: "Manuell", regime: market?.regime ?? "–", reason, manual: true };
+    this.lastPrices[sym] = price;
+    await this.save();
+    await this.logTrade({ ts: now.toISOString(), mode: this.broker.mode, symbol: sym, action: "ENTRY", price: fill.price, amount: fill.amount, fee: fill.fee, pnl: null,
+      strategy: "Manuell", regime: market?.regime ?? "–", reason, equity: await this.equity() });
+    const h = (this.state.hourly ||= { entries: 0, exits: 0, pnl: 0 });
+    h.entries++;
+    await this.notify(`ENTRY ${sym} ${fill.amount.toFixed(5)} @ ${fmtPx(fill.price)} (Wert ${(fill.amount * fill.price).toFixed(2)} USD, Gebühr ${fill.fee.toFixed(2)} USD) | Stop-Loss ${fmtPx(st)} | Take-Profit ${fmtPx(tp)} | Risiko ${riskCash.toFixed(2)} USD | Manuell\nWarum gekauft: ${reason}`);
+    return `${sym} gekauft`;
   }
 
   async close(pos, refPrice, reason, now) {
@@ -274,7 +387,7 @@ export class Engine {
     try { fill = await this.broker.openLong(sym, amount, stop, price); }
     catch (e) { this.state.pending = null; await this.save(); await this.notify(`${sym}: Order fehlgeschlagen: ${e.message}`); return; }
     this.state.positions[sym] = {
-      symbol: sym, amount: fill.amount, entryPrice: fill.price, stop, takeProfit, entryFee: fill.fee,
+      symbol: sym, amount: fill.amount, entryPrice: fill.price, stop, initialStop: stop, takeProfit, entryFee: fill.fee,
       openedAt: now.toISOString(), strategySpec: strategy.toSpec(), strategyName: strategy.name, regime: market.regime, reason,
     };
     this.state.pending = null;
@@ -317,7 +430,7 @@ export class Engine {
         const fill = await this.broker.openLong(sym, amount, stop, price);
         const reason = `TESTTRADE (manuell ausgelöst, kein Strategie-Signal, nur Paper). Stop ${fmtPx(stop)}, Ziel ${fmtPx(takeProfit)}; ` +
           `Marktphase: ${summarize(market)}; wird danach nach den üblichen Regeln der Strategie ${strategy.name} verwaltet.`;
-        this.state.positions[sym] = { symbol: sym, amount: fill.amount, entryPrice: fill.price, stop, takeProfit, entryFee: fill.fee,
+        this.state.positions[sym] = { symbol: sym, amount: fill.amount, entryPrice: fill.price, stop, initialStop: stop, takeProfit, entryFee: fill.fee,
           openedAt: now.toISOString(), strategySpec: strategy.toSpec(), strategyName: `Test · ${strategy.name}`, regime: market.regime, reason };
         await this.save();
         await this.logTrade({ ts: now.toISOString(), mode: this.broker.mode, symbol: sym, action: "ENTRY", price: fill.price, amount: fill.amount,

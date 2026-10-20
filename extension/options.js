@@ -21,6 +21,13 @@ const SECTIONS = [
     ["risk.atrStopMult", "Stop-Loss (x ATR)", "number"],
     ["risk.takeProfitRr", "Take-Profit (Vielfaches des Risikos)", "number"],
   ]],
+  ["KI-Trailing: Stop-Loss und Take-Profit nachziehen", [
+    ["trail.enabled", "Aktiv", "bool", "Zieht den Stop-Loss nach oben, sobald eine Position im Plus ist – nie nach unten. Regelbasiert (kein Sprachmodell), jede Anpassung wird mit Grund gemeldet. Pro Position im Dashboard abschaltbar."],
+    ["trail.startUsd", "Start ab Gewinn (USD)", "number", "Ab diesem Gewinn (vor Gebühren) wird gesichert – Beispiel 40: bei +40 liegt der Stop bei +30."],
+    ["trail.startR", "… oder ab Vielfachem des Risikos (R)", "number", "1 = sobald der Gewinn so groß ist wie das ursprüngliche Risiko. Es genügt eine der beiden Bedingungen (bei kleinem Konto greift meist diese)."],
+    ["trail.lockFraction", "Gesicherter Anteil des Gewinns (0,3–0,95)", "number", "0,75 = bei +40 Stop bei +30. Bei starkem Aufwärtstrend automatisch 0,15 weniger, bei Seitwärts/Abwärts 0,10 mehr."],
+    ["trail.extendTp", "Take-Profit bei starkem Trend nahe am Ziel um 1R anheben", "bool"],
+  ]],
   ["Kosten (für Backtest und Paper)", [
     ["costs.feePct", "Gebühr je Order (%)", "number", "Gilt für Kauf UND Verkauf. Mindestwerte (bewusst hoch): Krypto 0,26 + 0,20 Rutschen, Währungen 0,03 + 0,03, Metalle 0,06 + 0,06 – niedrigere Eingaben werden angehoben."],
     ["costs.slippagePct", "Slippage je Order (%)", "number"],

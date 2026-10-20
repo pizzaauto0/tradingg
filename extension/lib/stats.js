@@ -27,7 +27,7 @@ const tradeLine = (t, labels) => {
 // snap: { account: getAccount(), bots: [{ id, label, enabled, positions: [{ symbol, amount, entryPrice, stop, takeProfit, price, strategyName, openedAt }] }], trades: [...], now: ISO }
 // view: "stats" (alles) | "positions" (offene Trades) | "trades" (letzte Käufe/Verkäufe)
 export function buildStatsEmbed(snap, view = "stats") {
-  const { account: a, bots, trades } = snap, labels = Object.fromEntries(bots.map((b) => [b.id, b.label]));
+  const { account: a, bots } = snap, trades = snap.trades.filter((t) => t.action === "ENTRY" || t.action === "EXIT"), labels = Object.fromEntries(bots.map((b) => [b.id, b.label]));
   const all = tradeStats(trades), fields = [];
   const open = bots.flatMap((b) => b.positions.map((p) => ({ ...p, bot: b.label })));
   const unreal = open.reduce((x, p) => x + (p.price - p.entryPrice) * p.amount, 0);

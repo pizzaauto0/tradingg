@@ -358,7 +358,30 @@ export async function handle(msg, fetchFn = fetch) {
         ema20: cut(e20), ema50: cut(e50), position: st.positions[sym] || null, positions: st.positions, activity: st.activity || {},
         decisions: (st.decisions || []).slice(-15).reverse(), symbols: cfg.assets.map(symbolOf), enabled: st.enabled, paper: !cfg.liveTrading,
         trades: (await getLocal("trades", [])).filter((t) => t.symbol === sym).slice(-30),
-        risk: st.risk || {}, cash: cfg.liveTrading ? null : (await loadAccount(cfg)).cash, maxPositions: cfg.risk.maxOpenPositions };
+        risk: st.risk || {}, cash: cfg.liveTrading ? null : (await loadAccount(cfg)).cash, trail: cfg.trail, manualBuy: !cfg.liveTrading,
+        costs: cfg.costs, maxPositionPct: cfg.risk.maxPositionPct, riskPerTradePct: cfg.risk.riskPerTradePct, maxPositions: cfg.risk.maxOpenPositions };
+    }
+    case "buy": case "sell": case "adjust": { // Handeln im Dashboard: Kauf (nur Paper), Verkauf, Stop-Loss/Take-Profit/Trailing einer offenen Position ändern
+      await whenIdle();
+      const state = await loadState(cfg, botId), account = cfg.liveTrading ? null : await loadAccount(cfg);
+      let broker = null;
+      if (!cfg.liveTrading) broker = new PaperBroker(cfg, state, account);
+      else if (msg.type === "sell") {
+        const key = await getUnlockedKey();
+        if (!key) throw new Error("Wallet zuerst entsperren.");
+        broker = new SolanaWallet(cfg, key, fetchFn);
+      } else if (msg.type === "buy") throw new Error("Manueller Kauf ist nur im Paper-Modus erlaubt.");
+      else broker = { mode: "live", cash: async () => 0 }; // Stop/Ziel ändern braucht kein Konto: nur der Bot überwacht sie
+      const engine = makeEngine(botId, cfg, state, account, broker, fetchFn, makeNotifier(cfg, fetchFn, botId), async () => { throw new Error("nicht benötigt"); });
+      const num = (x) => (x === "" || x == null ? undefined : Number(x));
+      for (const k of ["usd", "stop", "takeProfit"]) if (msg[k] != null && msg[k] !== "" && !(Number(msg[k]) > 0)) throw new Error("Zahlen müssen größer 0 sein.");
+      const sym = String(msg.symbol || "");
+      const text = msg.type === "buy" ? await engine.manualBuy(sym, { usd: num(msg.usd), stop: num(msg.stop), takeProfit: num(msg.takeProfit) })
+        : msg.type === "sell" ? await engine.manualSell(sym)
+        : await engine.adjustPosition(sym, { stop: num(msg.stop), takeProfit: num(msg.takeProfit), trailOff: msg.trailOff });
+      await setLocal(stateKey(cfg, botId), state);
+      if (account) await saveAccount(account);
+      return text;
     }
     case "tickNow": await whenIdle(); await runTick({ fetchFn }); return true;
     case "stop": { const st = await loadState(cfg, botId); st.enabled = false; await setLocal(stateKey(cfg, botId), st); return true; }

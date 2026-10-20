@@ -59,6 +59,9 @@ export const DEFAULTS = {
     riskPerTradePct: 1.0, maxDailyLossPct: 5.0, closePositionsOnDailyLimit: true,
     maxOpenPositions: 2, maxPositionPct: 50.0, atrPeriod: 14, atrStopMult: 2.0, takeProfitRr: 2.0,
   },
+  // KI-Trailing (lib/trail.js): zieht Stop-Loss (und bei starkem Trend das Ziel) nach, sobald die Position im Plus ist. startUsd: Gewinn in USD, ab dem gesichert wird;
+  // startR: oder Vielfaches des ursprünglichen Risikos; lockFraction: Anteil des aktuellen Gewinns, den der Stop sichert (0,75: bei +40 Stop bei +30).
+  trail: { enabled: true, startUsd: 40, startR: 1.0, lockFraction: 0.75, extendTp: true },
   costs: { feePct: 0.26, slippagePct: 0.20 }, // je Order (Kauf UND Verkauf); bewusst hoch angesetzt – lieber zu viele Kosten als zu wenige
   backtest: {
     minCandles: 1000, minTrades: 20, minReturnPct: 2.0, maxDrawdownPct: 15.0, minSharpe: 1.0,
@@ -134,6 +137,8 @@ export function validateConfig(c) {
   if (!(r.maxPositionPct > 0 && r.maxPositionPct <= 100)) fail("Max. Positionsgröße muss in (0, 100] % liegen.");
   if (!(r.atrPeriod >= 2 && r.atrStopMult > 0 && r.takeProfitRr > 0)) fail("ATR-/Stop-Parameter ungültig.");
   if (c.costs.feePct < 0 || c.costs.slippagePct < 0) fail("Kosten dürfen nicht negativ sein.");
+  if (!(c.trail.startUsd > 0 && c.trail.startR > 0)) fail("Trailing: Startgewinn (USD) und Start (R) müssen größer 0 sein.");
+  if (!(c.trail.lockFraction >= 0.3 && c.trail.lockFraction <= 0.95)) fail("Trailing: gesicherter Gewinnanteil muss zwischen 0,3 und 0,95 liegen.");
   if (c.discord.channelId && !/^\d{5,25}$/.test(c.discord.channelId)) fail("Discord-Kanal-ID ungültig (nur Ziffern; Kanal rechtsklicken → „Kanal-ID kopieren“, Entwicklermodus nötig).");
   if (c.discord.botToken && !/^[\w.-]{30,120}$/.test(c.discord.botToken)) fail("Discord-Bot-Token ungültig.");
   if (c.discord.webhook && !WEBHOOK_RE.test(c.discord.webhook)) fail("Discord-Webhook ungültig (erwartet: https://discord.com/api/webhooks/<Zahl>/<Schlüssel>).");

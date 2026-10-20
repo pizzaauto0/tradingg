@@ -38,6 +38,18 @@ Einstellungen (⚙ in irgendeinem Tab) → *Discord-Meldungen*: Webhook-URL einf
 - Warnungen (Not-Aus, Tageslimit, Fehler).
 Die Webhook-URL gehört nicht ins Repository und nicht in Chats: wer sie kennt, kann in deinen Kanal schreiben. Bei Verdacht in Discord löschen und neu anlegen.
 
+## Dashboard: kaufen, verkaufen, Stop-Loss/Take-Profit verschieben
+Im Dashboard (📈 im jeweiligen Tab) steht neben dem Chart die Karte **Handeln**:
+- **Kaufen** (nur Paper): Betrag in USD, Stop-Loss und Take-Profit optional (leer = Betrag nach Risikoregel, Stop 2×ATR, Ziel nach Regel). Gebühren sind eingerechnet; harte Grenzen: höchstens 2 % Risiko, maximale Positionsgröße, Positionslimit.
+- **Verkaufen**: schließt die Position sofort zum Marktpreis. **Stop-Loss/Take-Profit setzen**: beliebiger Kurs (Stop muss unter, Ziel über dem Kurs liegen); Schnellknöpfe „Stop → Einstand“, „Stop sichert 50 % / 75 %“.
+- Darunter der Verlauf aller Anpassungen (wer: Du oder KI, von → nach, Grund) und die Liste der Käufe und Verkäufe des Marktes.
+
+### KI-Trailing
+Der Bot zieht den Stop-Loss selbst nach, sobald eine Position im Plus ist – **regelbasiert und mit Begründung, kein Sprachmodell**. Beispiel: ab **+40 USD** Gewinn (oder ab 1× dem ursprünglichen Risiko, es genügt eine Bedingung) liegt der Stop bei **+30** (75 % gesichert).
+Je nach Lage: starker Aufwärtstrend (ADX ≥ 25) → weniger sichern (der Trend darf laufen) und bei Kurs nahe am Ziel das Ziel um 1R anheben (höchstens 3×); Seitwärts/Abwärts → mehr sichern.
+Sicherungen: Stop nur nach oben, nie unter Einstand + Kosten (er liegt wirklich im Plus), nie näher als 0,5 ATR am Kurs. Jede Anpassung kommt als Meldung (Discord: 🔒) und steht im Trade-Log. Einstellbar unter ⚙ „KI-Trailing“, je Position im Dashboard abschaltbar.
+Hinweis: Das Spielgeld rechnet in USD (kein Euro). Bei kleinem Konto greift meist die 1R-Bedingung früher als die 40 USD.
+
 ## Discord-Knöpfe: Live-Statistik vom Handy
 Ein Knopf unter einer Nachricht kann nur von einem **Discord-Bot** beantwortet werden (ein Webhook allein kann das nicht). Einmal einrichten:
 1. discord.com/developers/applications → *New Application* → links *Bot* → *Reset Token* → Token kopieren (nie weitergeben).
