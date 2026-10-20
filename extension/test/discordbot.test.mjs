@@ -77,6 +77,21 @@ test("Bot: meldet sich an, antwortet auf Knopfklick privat mit der Statistik", a
   b.stop();
 });
 
+test("Bot: fetch wird nie als Methode des Bots aufgerufen (im Browser wäre das „Illegal invocation“ und kein Klick würde beantwortet)", async () => {
+  const seen = [];
+  const strictFetch = function (url, opt) {   // wie das echte fetch: this muss undefined/global sein
+    if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+    seen.push(url); return Promise.resolve({ ok: true, status: 204, json: async () => ({}) });
+  };
+  const { b } = bot({ fetchFn: strictFetch });
+  b.start();
+  const ws = FakeWS.last;
+  ws.emit({ op: 10, d: { heartbeat_interval: 60_000 } }); ws.emit({ op: 0, t: "READY", s: 1, d: { user: { username: "x" } } });
+  ws.emit(click("stats")); await new Promise((r) => setTimeout(r, 10));
+  assert.equal(seen.length, 1); assert.equal(b.status().answered, 1); assert.equal(b.status().error, null);
+  b.stop();
+});
+
 test("Bot: Token ungültig stoppt, Verbindungsabbruch verbindet neu", async () => {
   const { b } = bot();
   b.start();

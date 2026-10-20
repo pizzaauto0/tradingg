@@ -45,6 +45,8 @@ export class DiscordBot {
   // opts: { token, channelId, getSnapshot(), fetchFn, WS }
   constructor(opts) {
     Object.assign(this, { fetchFn: fetch, WS: globalThis.WebSocket }, opts);
+    const raw = this.fetchFn;
+    this.fetchFn = (...a) => raw(...a);   // nie als Methode aufrufen: fetch verlangt window/undefined als this („Illegal invocation“)
     this.state = "gestoppt"; this.error = null; this.ws = null; this.seq = null; this.hb = null; this.stopped = true; this.retry = 0; this.answered = 0;
   }
 

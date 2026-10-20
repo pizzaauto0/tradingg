@@ -119,6 +119,9 @@ async function build() {
       catch (e) { errorBox.textContent = e.message + " (Token und Kanal-ID zuerst speichern.)"; errorBox.hidden = false; scrollTo(0, 0); alert(errorBox.textContent); }
     } }, "Discord-Knöpfe posten"),
     h("button", { class: "btn", type: "button", onclick: async () => {
+      try { const st = await call("discordStatus"); alert(`Discord-Bot: ${st.state}${st.user ? " als " + st.user : ""}\nBeantwortete Klicks: ${st.answered ?? 0}${st.error ? "\nLetzter Fehler: " + st.error : ""}`); } catch (e) { alert(e.message); }
+    } }, "Bot-Status"),
+    h("button", { class: "btn", type: "button", onclick: async () => {
       try { await call("testDiscordLog"); alert("Testnachricht an den Log-Webhook gesendet."); } catch (e) { errorBox.textContent = e.message + " (Log-Webhook zuerst eintragen und speichern.)"; errorBox.hidden = false; scrollTo(0, 0); alert(errorBox.textContent); }
     } }, "Log-Webhook testen"),
     h("button", { class: "btn", type: "button", onclick: async () => {
