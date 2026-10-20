@@ -1,0 +1,42 @@
+name: Windows-App bauen (MT5Bot.exe)
+
+# Manuell starten (Actions → "Windows-App bauen" → Run workflow) oder durch ein Tag "app-v*".
+# Ergebnis: Artefakt "MT5Bot-Windows" (ZIP mit MT5Bot.exe). Demo-/Paper-Software, keine Anlageberatung.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["app-v*"]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+      - name: Abhängigkeiten
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r mt5bot/requirements.txt pyinstaller pytest
+      - name: Tests (ohne MetaTrader)
+        run: python -m pytest tests/test_mt5bot.py tests/test_mt5app.py tests/test_mt5bot_telegram.py -q
+      - name: MT5Bot.exe bauen
+        shell: cmd
+        run: >
+          python -m PyInstaller --noconfirm --clean --windowed --name MT5Bot
+          --add-data "mt5bot/web;mt5bot/web"
+          --collect-submodules tradingbot --collect-submodules mt5bot --hidden-import MetaTrader5
+          packaging/mt5bot_entry.py
+      - name: Start-Test (Programm startet, meldet fehlendes MetaTrader statt abzustürzen)
+        shell: pwsh
+        run: |
+          $env:MT5BOT_HOME = "$PWD\testhome"
+          $p = Start-Process -FilePath "dist\MT5Bot\MT5Bot.exe" -ArgumentList "--background" -PassThru
+          Start-Sleep -Seconds 15
+          if ($p.HasExited) { Write-Host "beendet mit Code $($p.ExitCode) (erwartet auf dem Build-Server ohne MetaTrader)" } else { Write-Host "läuft"; Stop-Process $p }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MT5Bot-Windows
+          path: dist/MT5Bot

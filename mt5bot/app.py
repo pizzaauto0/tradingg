@@ -114,6 +114,9 @@ def make_shortcut() -> Path:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    for name in ("stdout", "stderr"):   # .exe ohne Konsole (--windowed): keine Ausgabe-Ströme → ins Leere schreiben statt abzustürzen
+        if getattr(sys, name) is None:
+            setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
     home_arg = argv[argv.index("--home") + 1] if "--home" in argv and argv.index("--home") + 1 < len(argv) else None
     background = "--background" in argv or "--no-window" in argv
     if "--shortcut" in argv:
