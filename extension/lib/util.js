@@ -46,3 +46,6 @@ export function timeframeSeconds(tf) {
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export const nowIso = () => new Date().toISOString();
+
+// Preis mit passend vielen Nachkommastellen (Währungen ~1,0832, Krypto/Metalle 2 Stellen)
+export const fmtPx = (x) => (x == null || !Number.isFinite(x) ? "–" : x >= 100 ? x.toFixed(2) : x >= 1 ? x.toFixed(4) : x.toFixed(6));

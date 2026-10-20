@@ -24,6 +24,20 @@ gibt es die MetaTrader-App in `../mt5bot`). Nur Kauf (Long), **ohne Hebel**: bei
 Positionsgröße (33 % des Kapitals) das Risiko meist weit unter 1 % – Gewinne und Verluste bleiben klein. USD/EUR ist der Kehrwert von EUR/USD und
 rechnet das Spielgeld 1:1 (Näherung). Yahoo-Daten: Innertageskerzen reichen nur ~60 Tage (5/15/30 Min.) bzw. ~2 Jahre (1 Std.) zurück.
 
+## Gebühren (bewusst zu hoch)
+Backtest und Paper-Handel rechnen bei **jedem Kauf und jedem Verkauf** Gebühr/Spread plus Rutschen ab. Untergrenzen je Order:
+Krypto 0,26 % + 0,20 %, Währungen 0,03 % + 0,03 %, Metalle 0,06 % + 0,06 % – deutlich mehr als echte Broker verlangen. Niedriger eingestellte Werte
+werden automatisch auf diese Grenze angehoben, höhere bleiben. Der PnL in Meldungen ist **netto nach Gebühren**.
+
+## Discord-Meldungen
+Einstellungen (⚙ in irgendeinem Tab) → *Discord-Meldungen*: Webhook-URL einfügen, *Aktiv* anhaken, speichern, *Discord testen*. Gilt für alle drei Bots. Es kommen:
+- **Kauf** sofort: Menge, Preis, Wert, Gebühr, **Stop-Loss, Take-Profit**, Risiko, Strategie, Marktphase und **„Warum gekauft“** (Signal, Marktphase, Backtest-Werte).
+- **Verkauf** sofort: Preis, Einstieg, **PnL netto nach Gebühren**, Stop/Ziel, Haltedauer und **„Warum verkauft“** (Stop, Ziel oder Ausstiegssignal).
+- **Stundenbericht** je Bot (beim Start und danach jede Stunde): Eigenkapital, Käufe/Verkäufe seit dem letzten Bericht, je Markt **warum nicht gekauft**
+  (keine zugelassene Strategie, Marktphase passt nicht, kein Signal, Position schon offen, Tageslimit, Positionslimit …) und offene Positionen mit aktuellem Ergebnis.
+- Warnungen (Not-Aus, Tageslimit, Fehler).
+Die Webhook-URL gehört nicht ins Repository und nicht in Chats: wer sie kennt, kann in deinen Kanal schreiben. Bei Verdacht in Discord löschen und neu anlegen.
+
 ## Starten (mit Node.js ≥ 20)
 ```
 cd desktop

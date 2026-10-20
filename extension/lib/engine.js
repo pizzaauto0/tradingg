@@ -3,7 +3,7 @@ import { atr, classifyMarket, summarize } from "./indicators.js";
 import { buildStrategy } from "./strategies.js";
 import { positionSize, RiskManager, stopAndTarget } from "./risk.js";
 import { selectStrategy } from "./pipeline.js";
-import { timeframeSeconds } from "./util.js";
+import { fmtPx, timeframeSeconds } from "./util.js";
 import { symbolOf } from "./config.js";
 
 const MIN_NOTIONAL_USD = 5;
@@ -91,7 +91,47 @@ export class Engine {
       if (!this.risk.halted) await this.lookForEntry(sym, d, now, obs);
       state.lastCandle[sym] = d.stamp;
     }
+    await this.maybeHourly(now, equity);
     await this.save();
+  }
+
+  // ---- Stundenbericht: warum gekauft / warum nicht (geht nur an Discord) ----
+  whyNot(sym) {
+    const { state } = this, a = state.activity[sym];
+    if (!a) return "noch keine Daten";
+    if (a.error) return `Kursdaten nicht ladbar (${a.error})`;
+    if (state.positions[sym]) return "Position ist offen (höchstens eine je Markt)";
+    if ((state.problems || []).some((p) => p.startsWith(sym + ":"))) return "keine Kursdaten im Strategie-Scan";
+    if (!a.regime) return `Marktanalyse nicht möglich${a.note ? " (" + a.note + ")" : ""}`;
+    if (!a.strategy) {
+      const any = (state.approved || []).some((r) => r.symbol === sym && r.active !== false);
+      return any ? `keine aktive Strategie passt zur Marktphase „${a.regime}“` : "keine zugelassene Strategie (Backtest nicht bestanden) – der Bot wartet";
+    }
+    if (!a.signal) return `kein Einstiegssignal der Strategie ${a.strategy.split("(")[0]}`;
+    const [ok, why] = this.risk.canOpen(Object.keys(state.positions).length);
+    if (this.risk.halted) return "Signal vorhanden, aber Tageslimit erreicht – kein Handel";
+    if (!ok) return `Signal vorhanden, aber ${why}`;
+    return "Signal vorhanden – Einstieg wird bei der nächsten geschlossenen Kerze ausgeführt oder wegen Positionsgröße/Guthaben abgelehnt";
+  }
+
+  async maybeHourly(now, equity) {
+    const { state } = this;
+    if (state.lastHourly && now - Date.parse(state.lastHourly) < 3_600_000) return;
+    const h = state.hourly || { entries: 0, exits: 0, pnl: 0 }, open = Object.values(state.positions);
+    const lines = [`🕐 **Stundenbericht** ${now.toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })} · Eigenkapital (gemeinsames Konto) ${equity.toFixed(2)} USD · Positionen ${open.length}/${this.cfg.risk.maxOpenPositions}` +
+      `${this.risk.halted ? " · TAGESLIMIT ERREICHT" : ""}`,
+      `Seit dem letzten Bericht: ${h.entries} Kauf/Käufe, ${h.exits} Verkauf/Verkäufe${h.exits ? `, Ergebnis ${h.pnl >= 0 ? "+" : ""}${h.pnl.toFixed(2)} USD netto` : ""}`];
+    for (const sym of this.symbols) {
+      const a = state.activity[sym];
+      lines.push(`• ${sym}${a?.price != null ? " " + fmtPx(a.price) : ""}${a?.regime ? " · " + a.regime : ""}: ${state.positions[sym] ? "🟢 gekauft – " : "kein Kauf – "}${this.whyNot(sym)}`);
+    }
+    for (const p of open) {
+      const px = this.lastPrices[p.symbol] ?? p.entryPrice, pnl = (px - p.entryPrice) * p.amount;
+      lines.push(`📌 offen: ${p.symbol} ${p.amount.toFixed(5)} @ ${fmtPx(p.entryPrice)} | jetzt ${fmtPx(px)} (${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} USD) | Stop ${fmtPx(p.stop)} | Ziel ${fmtPx(p.takeProfit)} | ${p.strategyName}`);
+    }
+    state.hourly = { entries: 0, exits: 0, pnl: 0 };
+    state.lastHourly = now.toISOString();
+    await (this.notify.report || this.notify)(lines.join("\n"));
   }
 
   // ---- Positionen ----
@@ -135,7 +175,11 @@ export class Engine {
     await this.save();
     await this.logTrade({ ts: now.toISOString(), mode: this.broker.mode, symbol: pos.symbol, action: "EXIT", price: fill.price,
       amount: fill.amount, fee: fill.fee, pnl, strategy: pos.strategyName, regime: pos.regime, reason, equity: await this.equity() });
-    await this.notify(`EXIT ${pos.symbol} @ ${fill.price.toFixed(2)} | PnL ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} | ${reason}`);
+    const h = (this.state.hourly ||= { entries: 0, exits: 0, pnl: 0 });
+    h.exits++; h.pnl += pnl;
+    const held = (Date.parse(now.toISOString()) - Date.parse(pos.openedAt)) / 3.6e6, costs = pos.entryFee + fill.fee;
+    await this.notify(`EXIT ${pos.symbol} @ ${fmtPx(fill.price)} (Einstieg ${fmtPx(pos.entryPrice)}) | PnL ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} USD netto nach Gebühren ${costs.toFixed(2)} USD` +
+      ` | Stop war ${fmtPx(pos.stop)}, Ziel ${fmtPx(pos.takeProfit)} | gehalten ${held < 48 ? held.toFixed(1) + " h" : (held / 24).toFixed(1) + " Tage"}\nWarum verkauft: ${reason}`);
   }
 
   async flatten(reason, now) {
@@ -220,8 +264,8 @@ export class Engine {
     if (amount * price < MIN_NOTIONAL_USD) { console.info(`${sym}: Positionsgröße unter Minimum (${(amount * price).toFixed(2)} USD)`); return; }
 
     const riskCash = amount * (price - stop);
-    const reason = `${sel.record.explore ? "EXPERIMENTELL (Strategie hat die strengen Prüfungen NICHT bestanden/wurde nicht geprüft): " : ""}${sel.record.title ? `${sel.record.title} – ` : ""}${strategy.explain(closed)}; Marktphase: ${summarize(market)}; Stop ${stop.toFixed(2)} ` +
-      `(${risk.atrStopMult}x ATR), Ziel ${takeProfit.toFixed(2)}; Risiko ca. ${riskCash.toFixed(2)} ` +
+    const reason = `${sel.record.explore ? "EXPERIMENTELL (Strategie hat die strengen Prüfungen NICHT bestanden/wurde nicht geprüft): " : ""}${sel.record.title ? `${sel.record.title} – ` : ""}${strategy.explain(closed)}; Marktphase: ${summarize(market)}; Stop ${fmtPx(stop)} ` +
+      `(${risk.atrStopMult}x ATR), Ziel ${fmtPx(takeProfit)}; Risiko ca. ${riskCash.toFixed(2)} ` +
       `(${((riskCash / equity) * 100).toFixed(2)}% des Kapitals); Backtest: Sharpe ${(sel.record.metrics?.sharpe ?? 0).toFixed(2)}, Trefferquote ${(sel.record.metrics?.win_rate_pct ?? 0).toFixed(1)}%`;
 
     this.state.pending = { what: `Kauf ${sym}`, ts: now.toISOString() };
@@ -238,7 +282,10 @@ export class Engine {
     await this.save(); // Position sofort sichern
     await this.logTrade({ ts: now.toISOString(), mode: this.broker.mode, symbol: sym, action: "ENTRY", price: fill.price,
       amount: fill.amount, fee: fill.fee, pnl: null, strategy: strategy.name, regime: market.regime, reason, equity: await this.equity() });
-    await this.notify(`ENTRY ${sym} ${fill.amount.toFixed(5)} @ ${fill.price.toFixed(2)} | Stop ${stop.toFixed(2)} | ${strategy.name} | ${market.regime}`);
+    const h = (this.state.hourly ||= { entries: 0, exits: 0, pnl: 0 });
+    h.entries++;
+    await this.notify(`ENTRY ${sym} ${fill.amount.toFixed(5)} @ ${fmtPx(fill.price)} (Wert ${(fill.amount * fill.price).toFixed(2)} USD, Gebühr ${fill.fee.toFixed(2)} USD) | Stop-Loss ${fmtPx(stop)} | Take-Profit ${fmtPx(takeProfit)}` +
+      ` | Risiko ${riskCash.toFixed(2)} USD | ${strategy.name} | ${market.regime}\nWarum gekauft: ${reason}`);
   }
 
   // Testtrade (nur Paper): eröffnet sofort eine Position, ohne auf ein Strategie-Signal zu warten.
@@ -268,14 +315,14 @@ export class Engine {
         const amount = floorTo(positionSize(this.risk.sizingEquity(equity), await this.broker.cash(), price, stop, this.cfg.risk, this.cfg.costs), price > 1000 ? 6 : 5);
         if (amount * price < MIN_NOTIONAL_USD) continue;
         const fill = await this.broker.openLong(sym, amount, stop, price);
-        const reason = `TESTTRADE (manuell ausgelöst, kein Strategie-Signal, nur Paper). Stop ${stop.toFixed(2)}, Ziel ${takeProfit.toFixed(2)}; ` +
+        const reason = `TESTTRADE (manuell ausgelöst, kein Strategie-Signal, nur Paper). Stop ${fmtPx(stop)}, Ziel ${fmtPx(takeProfit)}; ` +
           `Marktphase: ${summarize(market)}; wird danach nach den üblichen Regeln der Strategie ${strategy.name} verwaltet.`;
         this.state.positions[sym] = { symbol: sym, amount: fill.amount, entryPrice: fill.price, stop, takeProfit, entryFee: fill.fee,
           openedAt: now.toISOString(), strategySpec: strategy.toSpec(), strategyName: `Test · ${strategy.name}`, regime: market.regime, reason };
         await this.save();
         await this.logTrade({ ts: now.toISOString(), mode: this.broker.mode, symbol: sym, action: "ENTRY", price: fill.price, amount: fill.amount,
           fee: fill.fee, pnl: null, strategy: `Test · ${strategy.name}`, regime: market.regime, reason, equity: await this.equity() });
-        await this.notify(`TESTTRADE ${sym} ${fill.amount.toFixed(5)} @ ${fill.price.toFixed(2)} | Stop ${stop.toFixed(2)} (Paper)`);
+        await this.notify(`TESTTRADE ${sym} ${fill.amount.toFixed(5)} @ ${fmtPx(fill.price)} | Stop ${fmtPx(stop)} (Paper)`);
         return sym;
       } catch (e) { lastErr = `${sym}: ${e.message}`; }
     }

@@ -17,7 +17,9 @@
     "https://api.jup.ag/*",
     "https://api.mainnet-beta.solana.com/*",
     "https://api.anthropic.com/*",
-    "https://api.telegram.org/*"
+    "https://api.telegram.org/*",
+    "https://discord.com/*",
+    "https://discordapp.com/*"
   ],
   "optional_host_permissions": ["https://*/*"],
   "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'self'" },

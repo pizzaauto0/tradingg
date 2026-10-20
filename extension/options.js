@@ -22,7 +22,7 @@ const SECTIONS = [
     ["risk.takeProfitRr", "Take-Profit (Vielfaches des Risikos)", "number"],
   ]],
   ["Kosten (für Backtest und Paper)", [
-    ["costs.feePct", "Gebühr je Order (%)", "number"],
+    ["costs.feePct", "Gebühr je Order (%)", "number", "Gilt für Kauf UND Verkauf. Mindestwerte (bewusst hoch): Krypto 0,26 + 0,20 Rutschen, Währungen 0,03 + 0,03, Metalle 0,06 + 0,06 – niedrigere Eingaben werden angehoben."],
     ["costs.slippagePct", "Slippage je Order (%)", "number"],
   ]],
   ["Backtest-Mindestwerte", [
@@ -52,6 +52,10 @@ const SECTIONS = [
     ["llm.enabled", "Aktiv", "bool", "Vorschläge sind nur Kandidaten und müssen den Backtest bestehen."],
     ["llm.apiKey", "Anthropic-API-Schlüssel", "password", "Wird unverschlüsselt im Browser-Speicher abgelegt."],
     ["llm.model", "Modell", "text"],
+  ]],
+  ["Discord-Meldungen (optional)", [
+    ["discord.enabled", "Aktiv", "bool", "Schickt jeden Kauf und Verkauf (mit Stop-Loss, Take-Profit, Gebühren und Begründung) und jede Stunde einen Bericht, warum gekauft oder nicht gekauft wurde."],
+    ["discord.webhook", "Webhook-URL", "password", "Discord: Servereinstellungen → Integrationen → Webhooks → URL kopieren. Wird im App-Speicher abgelegt; wer die URL kennt, kann in den Kanal schreiben – nie weitergeben."],
   ]],
   ["Telegram (optional)", [
     ["telegram.enabled", "Aktiv", "bool"],
@@ -98,6 +102,9 @@ async function build() {
     }
   }
   form.append(h("div", { class: "btns" }, h("button", { class: "btn primary", type: "submit" }, "Speichern"),
+    h("button", { class: "btn", type: "button", onclick: async () => {
+      try { await call("testDiscord"); alert("Testnachricht an Discord gesendet."); } catch (e) { errorBox.textContent = e.message + " (Webhook zuerst eintragen und speichern.)"; errorBox.hidden = false; }
+    } }, "Discord testen"),
     h("button", { class: "btn danger", type: "button", onclick: async () => {
       if (!confirm("Paper-Konto auf das Startkapital zurücksetzen? Gilt für ALLE Bots und geht nur ohne offene Positionen. Die Trade-Historie bleibt.")) return;
       try { await call("resetAccount"); alert("Paper-Konto zurückgesetzt."); } catch (e) { errorBox.textContent = e.message; errorBox.hidden = false; }

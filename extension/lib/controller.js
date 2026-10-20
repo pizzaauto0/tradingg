@@ -1,5 +1,5 @@
 // Steuerung: Konfiguration, Zustand, Durchlauf (Tick) und alle Aktionen, die das Popup auslösen kann.
-import { BOTS, BOT_IDS, DEFAULT_BOT, DEFAULTS, botAssets, botDefaults, mergeConfig, validateConfig, symbolOf } from "./config.js";
+import { BOTS, BOT_IDS, DEFAULT_BOT, DEFAULTS, MIN_COSTS, botAssets, botDefaults, mergeConfig, validateConfig, symbolOf } from "./config.js";
 import { ema } from "./indicators.js";
 import { getLocal, setLocal, appendTrade } from "./store.js";
 import { Engine } from "./engine.js";
@@ -10,6 +10,7 @@ import { createVault, decryptVault, deleteVault, getUnlockedKey, hasVault, lock,
 import { b58encode } from "./util.js";
 import { summarizeFailures } from "./diagnose.js";
 import { HELP, formatStatus, pollCommands } from "./telegram.js";
+import { decorate, sendDiscord } from "./discord.js";
 
 let current = null; // laufender Durchlauf (Promise) – es läuft nie mehr als einer gleichzeitig
 export async function whenIdle() { while (current) await current; }
@@ -20,15 +21,18 @@ export async function whenIdle() { while (current) await current; }
 // so bleiben vorhandene Daten und der Betrieb der Erweiterung unverändert. Live-Handel (Solana-Wallet) gibt es nur für Krypto.
 const isDefault = (botId) => botId === DEFAULT_BOT;
 const cfgKey = (botId) => (isDefault(botId) ? "config" : `config_${botId}`);
-const SHARED = ["capital", "telegram", "llm"];
+const SHARED = ["capital", "telegram", "discord", "llm"];
 const pick = (o, keys) => Object.fromEntries(keys.filter((k) => k in (o || {})).map((k) => [k, o[k]]));
 export const botOf = (msg) => (BOT_IDS.includes(msg?.bot) ? msg.bot : DEFAULT_BOT);
 
+// Kosten dürfen nicht unter die Mindestwerte des Bots fallen (lieber zu hohe als zu niedrige Gebühren).
+const withMinCosts = (cfg, botId) => ({ ...cfg, costs: { feePct: Math.max(cfg.costs.feePct, MIN_COSTS[botId].feePct), slippagePct: Math.max(cfg.costs.slippagePct, MIN_COSTS[botId].slippagePct) } });
+
 export async function loadConfig(botId = DEFAULT_BOT) {
   const main = validateConfig(mergeConfig(DEFAULTS, await getLocal("config", {})));
-  if (isDefault(botId)) return main;
+  if (isDefault(botId)) return withMinCosts(main, botId);
   const own = mergeConfig(botDefaults(botId), await getLocal(cfgKey(botId), {}));
-  return validateConfig({ ...own, liveTrading: false, ...pick(main, SHARED), solana: main.solana });
+  return withMinCosts(validateConfig({ ...own, liveTrading: false, ...pick(main, SHARED), solana: main.solana }), botId);
 }
 const stateKey = (cfg, botId = DEFAULT_BOT) => (isDefault(botId) ? `botState_${cfg.liveTrading ? "live" : "paper"}` : `botState_${botId}`);
 const defaultState = () => ({ enabled: false, approved: [], report: [], positions: {} });
@@ -86,11 +90,14 @@ async function pushLog(text, botId = DEFAULT_BOT) {
 
 export function makeNotifier(cfg, fetchFn = fetch, botId = DEFAULT_BOT) {
   const tag = isDefault(botId) ? "" : `[${BOTS[botId].label}] `;
-  return async (text) => {
+  const discord = (text) => cfg.discord?.enabled && cfg.discord.webhook
+    ? sendDiscord(cfg.discord.webhook, `**[${cfg.liveTrading ? "LIVE" : "PAPER"}${isDefault(botId) ? "" : " · " + BOTS[botId].label}]** ${decorate(text)}`, fetchFn).catch((e) => console.warn("Discord:", e.message))
+    : null;
+  const notify = async (text) => {
     console.info("NOTIFY:", tag + text);
     await pushLog(text, botId);
     if (/^(WARNUNG|NOT-AUS|ENTRY|EXIT|Tagesverlust)/.test(text) && globalThis.chrome?.notifications) {
-      chrome.notifications.create({ type: "basic", iconUrl: "icons/icon128.png", title: `Trading-Bot [${cfg.liveTrading ? "LIVE" : "PAPER"}]`, message: (tag + text).slice(0, 250) });
+      chrome.notifications.create({ type: "basic", iconUrl: "icons/icon128.png", title: `Trading-Bot [${cfg.liveTrading ? "LIVE" : "PAPER"}]`, message: (tag + text.split("\n")[0]).slice(0, 250) });
     }
     if (cfg.telegram.enabled && cfg.telegram.token && cfg.telegram.chatId) {
       try {
@@ -99,7 +106,10 @@ export function makeNotifier(cfg, fetchFn = fetch, botId = DEFAULT_BOT) {
           body: JSON.stringify({ chat_id: cfg.telegram.chatId, text: `[${cfg.liveTrading ? "LIVE" : "PAPER"}] ${tag}${text}`.slice(0, 4000) }) });
       } catch { /* Telegram-Fehler dürfen den Bot nie stoppen */ }
     }
+    await discord(text);
   };
+  notify.report = async (text) => { console.info("REPORT:", tag + text.split("\n")[0]); await discord(text); }; // Stundenbericht: nur Discord, nicht Telegram/Ereignisliste
+  return notify;
 }
 
 // ---- Ein Durchlauf (vom Alarm alle 30 s aufgerufen) ----------------------------------------------------------------
@@ -202,7 +212,8 @@ export async function pollTelegram(fetchFn = fetch) {
 }
 
 // ---- Aktionen aus dem Popup --------------------------------------------------------------------------------------
-const maskSecrets = (cfg) => ({ ...cfg, llm: { ...cfg.llm, apiKey: cfg.llm.apiKey ? "***" : "" }, telegram: { ...cfg.telegram, token: cfg.telegram.token ? "***" : "" } });
+const maskSecrets = (cfg) => ({ ...cfg, llm: { ...cfg.llm, apiKey: cfg.llm.apiKey ? "***" : "" }, telegram: { ...cfg.telegram, token: cfg.telegram.token ? "***" : "" },
+  discord: { ...cfg.discord, webhook: cfg.discord.webhook ? "***" : "" } });
 
 const ownRow = (botId) => (t) => (t.bot || DEFAULT_BOT) === botId;
 
@@ -248,6 +259,11 @@ export async function handle(msg, fetchFn = fetch) {
     case "getAccount": return getAccount();
     case "saveConfig": return saveConfig(msg.patch, botId);
     case "getConfig": return maskSecrets(cfg);
+    case "testDiscord": {
+      if (!cfg.discord.webhook) throw new Error("Kein Discord-Webhook eingetragen (zuerst speichern).");
+      await sendDiscord(cfg.discord.webhook, "✅ Trading-Bot: Discord-Verbindung funktioniert. Hier kommen Käufe/Verkäufe (mit Stop, Ziel und Begründung) und jede Stunde ein Bericht, warum gekauft oder nicht gekauft wurde.", fetchFn);
+      return true;
+    }
     case "startAll": { for (const id of BOT_IDS) await handle({ type: "start", bot: id }, fetchFn).catch(() => {}); return true; }
     case "stopAll": { for (const id of BOT_IDS) await handle({ type: "stop", bot: id }, fetchFn); return true; }
     case "killAll": {

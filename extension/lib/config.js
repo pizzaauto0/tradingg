@@ -59,7 +59,7 @@ export const DEFAULTS = {
     riskPerTradePct: 1.0, maxDailyLossPct: 5.0, closePositionsOnDailyLimit: true,
     maxOpenPositions: 2, maxPositionPct: 50.0, atrPeriod: 14, atrStopMult: 2.0, takeProfitRr: 2.0,
   },
-  costs: { feePct: 0.10, slippagePct: 0.15 },
+  costs: { feePct: 0.26, slippagePct: 0.20 }, // je Order (Kauf UND Verkauf); bewusst hoch angesetzt – lieber zu viele Kosten als zu wenige
   backtest: {
     minCandles: 1000, minTrades: 20, minReturnPct: 2.0, maxDrawdownPct: 15.0, minSharpe: 1.0,
     minWinRatePct: 55.0, minProfitFactor: 1.2, oosFraction: 0.3, minOosReturnPct: 0.0,
@@ -75,7 +75,13 @@ export const DEFAULTS = {
   },
   llm: { enabled: false, model: "claude-sonnet-5-5", apiKey: "", maxTokens: 4000 },
   telegram: { enabled: false, token: "", chatId: "" },
+  discord: { enabled: false, webhook: "" }, // Meldungen (Kauf/Verkauf mit Stop, Ziel, Begründung; Stundenbericht) per Discord-Webhook
 };
+
+// Mindestkosten je Order (Gebühr/Spread + Rutschen, in %) – weit über den echten Kosten, damit Backtest und Paper-Handel eher zu pessimistisch sind.
+// Niedrigere eingestellte Werte werden beim Laden auf diese Untergrenze angehoben (controller.loadConfig).
+export const MIN_COSTS = { crypto: { feePct: 0.26, slippagePct: 0.20 }, fx: { feePct: 0.03, slippagePct: 0.03 }, metals: { feePct: 0.06, slippagePct: 0.06 } };
+export const WEBHOOK_RE = /^https:\/\/(discord|discordapp)\.com\/api\/webhooks\/\d+\/[\w-]+$/;
 
 // Standardwerte je Bot: Währungen/Metalle brauchen andere Zeitrahmen, Kosten und Märkte als Krypto; Kapital, Telegram und LLM sind für alle gleich.
 export function botDefaults(botId) {
@@ -84,7 +90,7 @@ export function botDefaults(botId) {
   return mergeConfig(DEFAULTS, {
     assets: botAssets(botId), timeframe: "1h",
     risk: { maxPositionPct: 33, maxOpenPositions: 2 },
-    costs: fx ? { feePct: 0.01, slippagePct: 0.01 } : { feePct: 0.03, slippagePct: 0.03 },
+    costs: MIN_COSTS[botId],
     backtest: { minCandles: 1000 },
   });
 }
@@ -126,6 +132,7 @@ export function validateConfig(c) {
   if (!(r.maxPositionPct > 0 && r.maxPositionPct <= 100)) fail("Max. Positionsgröße muss in (0, 100] % liegen.");
   if (!(r.atrPeriod >= 2 && r.atrStopMult > 0 && r.takeProfitRr > 0)) fail("ATR-/Stop-Parameter ungültig.");
   if (c.costs.feePct < 0 || c.costs.slippagePct < 0) fail("Kosten dürfen nicht negativ sein.");
+  if (c.discord.webhook && !WEBHOOK_RE.test(c.discord.webhook)) fail("Discord-Webhook ungültig (erwartet: https://discord.com/api/webhooks/<Zahl>/<Schlüssel>).");
   if (!(Number.isInteger(c.pipeline.maxActiveStrategies) && c.pipeline.maxActiveStrategies >= 1)) fail("Anzahl aktiver Strategien muss eine ganze Zahl >= 1 sein.");
   if (!(c.backtest.oosFraction > 0 && c.backtest.oosFraction < 1)) fail("oosFraction muss in (0, 1) liegen.");
   if (!(c.solana.solReserve >= 0 && c.solana.slippageBps >= 1)) fail("Solana-Parameter ungültig.");
