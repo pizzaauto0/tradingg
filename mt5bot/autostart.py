@@ -28,15 +28,42 @@ def launcher_text(bat: Path) -> str:
             f'sh.Run "{cmd.replace(chr(34), chr(34) * 2)}", 7, False\r\n')
 
 
-def install(bat: Path | None = None) -> Path:
-    bat = (bat or Path(__file__).with_name("run_forever.bat")).resolve()
-    if not bat.exists():
-        raise RuntimeError(f"{bat} fehlt")
+def app_command_text(cmdline: str) -> str:
+    """Startdatei für die App (Fenster bleibt unsichtbar, das Portal öffnet sich erst auf Wunsch)."""
+    return ('\' Startet die MT5-Bot-App beim Anmelden. Entfernen: in der App unter Einstellungen oder python -m mt5bot.autostart remove\r\n'
+            'Set sh = CreateObject("WScript.Shell")\r\n'
+            f'sh.Run "{cmdline.replace(chr(34), chr(34) * 2)}", 0, False\r\n')
+
+
+def app_cmdline() -> str:
+    """Befehlszeile der App: die fertige .exe, sonst Python aus .venv im Projektordner."""
+    if getattr(sys, "frozen", False):
+        return f'"{sys.executable}" --background'
+    root = Path(__file__).resolve().parent.parent
+    py = root / ".venv" / "Scripts" / "pythonw.exe"
+    py = py if py.exists() else Path(sys.executable)
+    return f'cmd /c cd /d "{root}" && "{py}" -m mt5bot.app --background'
+
+
+def install(bat: Path | None = None, app: bool = False) -> Path:
     d = startup_dir()
     d.mkdir(parents=True, exist_ok=True)
     target = d / NAME
+    if app:
+        target.write_text(app_command_text(app_cmdline()), encoding="utf-8")
+        return target
+    bat = (bat or Path(__file__).with_name("run_forever.bat")).resolve()
+    if not bat.exists():
+        raise RuntimeError(f"{bat} fehlt")
     target.write_text(launcher_text(bat), encoding="utf-8")
     return target
+
+
+def installed() -> bool:
+    try:
+        return (startup_dir() / NAME).exists()
+    except RuntimeError:
+        return False
 
 
 def remove() -> bool:

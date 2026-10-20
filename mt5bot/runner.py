@@ -220,6 +220,7 @@ class Runner:
                 data = research.finish(self.folder, rows, mode, bars, max_active)
                 st.update(running=False, label="fertig", summary=research.summary_text(data), finished=True)
                 self.web_cmds.put(("", {"type": "reload"}))  # neue Strategien im Hauptfaden übernehmen
+                self.tg_notify("🔬 Strategie-Prüfung fertig.\n" + research.summary_text(data))
             except Exception as e:
                 log.exception("Strategie-Prüfung fehlgeschlagen")
                 st.update(running=False, label=f"Fehler: {type(e).__name__}: {e}")
@@ -268,6 +269,16 @@ class Runner:
                     from . import research
                     research.set_manual(self.folder, cmd["market"], cmd["tf"], cmd["strategy"], cmd["params"], cmd.get("title", cmd["strategy"]), bool(cmd["on"]))
                     text = "Strategie " + ("aktiviert" if cmd["on"] else "deaktiviert") + ". " + self.reload_settings("Strategie-Wahl")
+                elif t == "autostart":
+                    from . import autostart
+                    text = ("Autostart eingerichtet: die App startet beim Windows-Anmelden. " + str(autostart.install(app=True))) if cmd.get("on") else \
+                           ("Autostart entfernt." if autostart.remove() else "Autostart war nicht eingerichtet.")
+                elif t == "telegram_start":
+                    if self.tg is not None:
+                        self.tg.stop()
+                        self.tg = None
+                    self.start_telegram()
+                    text = "Telegram verbunden." if self.tg is not None else "Telegram nicht gestartet (Zugangsdaten fehlen oder Telegram ist ausgeschaltet)."
                 elif t == "save_settings":
                     from . import settings
                     settings.write(self.folder, settings.validate(cmd["overlay"]))
@@ -1040,6 +1051,11 @@ class Runner:
                 extra = {r: self.closed_bars(r, tf) for r in prof["strat"].needs}
                 log.info(f"   [{prof['name']}] {name} ({tf}): {prof['strat'].status(df, extra)}")
 
+    def tg_status(self) -> dict:
+        from . import telegram as tgm
+        token, chat = tgm.load_credentials(self.folder)
+        return {"configured": bool(token and chat), "running": self.tg is not None, "enabled": bool(getattr(self.cfg, "TELEGRAM_ENABLED", True))}
+
     def start_telegram(self) -> None:
         from . import telegram as tgm
         if not getattr(self.cfg, "TELEGRAM_ENABLED", True):
@@ -1092,9 +1108,11 @@ class Runner:
         self.connect()
         if getattr(self.cfg, "DASHBOARD_PORT", 0):
             from .dashboard import serve
+            from .telegram_setup import WebSetup
             info = serve(self.folder, self.cfg.DASHBOARD_PORT, self.cfg.SNAPSHOT_FILE, lan=getattr(self.cfg, "DASHBOARD_PHONE", False),
                          control=getattr(self.cfg, "DASHBOARD_CONTROL", "local"), submit=self.submit_web_command, results=self.web_results,
-                         symbols=lambda: sorted(self.symbols),
+                         symbols=lambda: sorted(self.symbols), research_state=lambda: self.research_state, tg_status=self.tg_status,
+                         tg_setup=WebSetup(self.folder),
                          open_browser=getattr(self.cfg, "DASHBOARD_OPEN_BROWSER", True) and not os.environ.get("MT5BOT_NO_BROWSER"))
             log.info(f"Oberfläche: {info['local']}")
             for u in info["phone"]:

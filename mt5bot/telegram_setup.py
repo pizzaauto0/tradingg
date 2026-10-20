@@ -17,6 +17,56 @@ from pathlib import Path
 from .telegram import CRED_FILE, TelegramApi
 
 
+class WebSetup:
+    """Dieselbe Einrichtung wie unten, aber in Schritten für die Oberfläche (Token prüfen → Chat finden → speichern).
+    Der Token bleibt nur im Speicher dieses Objekts und wird nie an den Browser zurückgegeben."""
+
+    def __init__(self, folder: str | Path = "."):
+        self.folder, self.api, self.bot, self.chat = Path(folder), None, None, None
+        self.offset = None
+
+    def check(self, token: str) -> dict:
+        token = (token or "").strip()
+        if ":" not in token or len(token) > 120 or any(c.isspace() for c in token):
+            raise ValueError("Das sieht nicht wie ein Token aus (Format 123456789:ABC…).")
+        api = TelegramApi(token)
+        try:
+            me = api.call("getMe", timeout=15)["result"]
+        except Exception as e:
+            raise ValueError(f"Token ungültig oder keine Verbindung: {e}") from None
+        self.api, self.bot, self.chat, self.token = api, me.get("username"), None, token
+        try:
+            api.call("getUpdates", {"offset": -1}, timeout=15)
+        except Exception:
+            pass
+        return {"bot": self.bot}
+
+    def find(self) -> dict | None:
+        """Sucht eine frische Nachricht an den Bot (der Nutzer schickt /start). None = noch keine."""
+        if self.api is None:
+            raise ValueError("Zuerst den Token prüfen.")
+        res = self.api.call("getUpdates", {"offset": self.offset, "timeout": 0}, timeout=15).get("result", [])
+        for upd in res:
+            self.offset = upd["update_id"] + 1
+            m = upd.get("message")
+            if m and m.get("chat", {}).get("id") and m["chat"].get("type") == "private" and time.time() - m.get("date", 0) < 300:
+                self.chat = m["chat"]
+        if not self.chat:
+            return None
+        return {"name": self.chat.get("first_name") or self.chat.get("username") or "?", "chat_id": str(self.chat["id"])}
+
+    def save(self, chat_id: str) -> None:
+        if self.api is None or not self.chat or str(self.chat["id"]) != str(chat_id):
+            raise ValueError("Erst Token prüfen und dem Bot eine Nachricht schicken.")
+        f = self.folder / CRED_FILE
+        f.write_text(json.dumps({"token": self.token, "chat_id": str(self.chat["id"])}), encoding="utf-8")
+        try:
+            os.chmod(f, 0o600)
+        except OSError:
+            pass
+        self.api.call("sendMessage", {"chat_id": self.chat["id"], "text": "MT5-Bot: Telegram ist eingerichtet. /help zeigt die Befehle."})
+
+
 def main(folder: str = ".") -> int:
     token = getpass.getpass("Bot-Token (Eingabe unsichtbar, dann Enter): ").strip()
     if ":" not in token:

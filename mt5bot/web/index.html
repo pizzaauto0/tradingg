@@ -6,7 +6,10 @@
 <title>MT5-Bot</title>
 <meta name="csrf" content="__CSRF__">
 <meta name="control" content="__CONTROL__">
-<link rel="icon" href="data:,">
+<meta name="local" content="__LOCAL__">
+<meta name="theme-color" content="#0d1117">
+<link rel="manifest" href="/manifest.webmanifest__QS__">
+<link rel="icon" href="/icon.svg">
 <style>
   :root {
     --bg: #0d1117; --panel: #141a22; --panel2: #10151c; --line: #222b36; --fg: #e6edf3; --muted: #7d8590;
@@ -74,6 +77,15 @@
   #toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--cyan); border-radius: 8px; padding: 10px 16px; z-index: 20; max-width: 90vw; }
   .badge.ext { border-color: #9e6a03; color: #d29922; background: rgba(187,128,9,.12); }
   .title { flex-wrap: wrap; gap: 6px 16px; } #profiles { word-break: break-all; } td { word-break: break-word; }
+  nav#tabs { display: flex; gap: 6px; padding: 8px 22px 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
+  nav#tabs button { border-radius: 8px 8px 0 0; border-bottom: none; white-space: nowrap; } nav#tabs button.on { border-color: var(--cyan); color: var(--cyan); background: var(--panel2); }
+  .note { color: var(--muted); margin: 6px 0 12px; max-width: 900px; white-space: pre-line; } .note b { color: var(--fg); }
+  .row2 { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 10px 0; }
+  select, input[type=text], input[type=number], input[type=password] { background: var(--panel2); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; font: inherit; }
+  input[type=text], input[type=password] { min-width: 260px; } .bar { height: 10px; background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; min-width: 240px; flex: 1; } .bar i { display: block; height: 100%; background: var(--cyan); width: 0; }
+  .form { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(160px, 260px); gap: 8px 16px; align-items: center; max-width: 900px; } .form small { color: var(--muted); grid-column: 1 / -1; margin-top: -4px; }
+  .ok { color: var(--green-t); white-space: nowrap; } .no { color: var(--red-t); white-space: nowrap; } td.why { max-width: 360px; color: var(--muted); font-size: 12px; }
+  .pc { padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); margin-bottom: 10px; max-width: 900px; }
   @media (max-width: 600px) { header { gap: 14px; padding: 12px 16px; } main { padding: 14px 16px 30px; } .grid { grid-template-columns: 1fr; } .sep { display: none; } }
 </style>
 </head>
@@ -89,7 +101,8 @@
   <div class="pill" id="status">lädt …</div>
   <button id="refresh">Refresh</button>
 </header>
-<main>
+<nav id="tabs"><button data-t="dash" class="on">Übersicht</button><button data-t="strat">Strategien</button><button data-t="set">Einstellungen</button></nav>
+<main id="tab-dash">
   <div id="banner"></div>
   <div id="phone"></div>
   <div id="ctl" class="ctl" hidden></div>
@@ -110,6 +123,24 @@
     <div class="title"><span>MÄRKTE &amp; SIGNALE</span><span id="profiles"></span></div>
     <table><thead><tr><th>PROFIL</th><th>MARKT</th><th>ZEITRAHMEN</th><th>ZUSTAND</th></tr></thead><tbody id="markets"></tbody></table>
   </div>
+</main>
+<main id="tab-strat" hidden>
+  <div class="title"><span>STRATEGIEN PRÜFEN &amp; FREIGEBEN</span><span id="rs-time"></span></div>
+  <div class="note"><b>Wie in der Erweiterung:</b> Die App holt die Kerzen deiner Märkte aus MetaTrader, testet viele Strategien mit Gebühren und Rutschen (Backtest, letzter Teil als „Out-of-Sample“) und lässt nur die handeln, die die Mindestwerte erfüllen. Das Profil <b>auto</b> muss dafür unter Einstellungen eingeschaltet sein. Ein Backtest ist keine Garantie – erst auf dem Demo-Konto beobachten.</div>
+  <div class="row2"><label>Modus <select id="rs-mode"></select></label><button class="go" id="rs-go">Prüfung starten</button><button id="rs-stop" hidden>Abbrechen</button><div class="bar"><i id="rs-bar"></i></div><span id="rs-label" class="note" style="margin:0"></span></div>
+  <div class="note" id="rs-modehelp"></div>
+  <div class="title"><span>AKTIV (HANDELT GERADE)</span></div><div id="rs-active"></div>
+  <div class="title" style="margin-top:22px"><span>ERGEBNISSE – „WARUM (NICHT)?“</span><label><input type="checkbox" id="rs-onlyok"> nur zugelassene</label></div>
+  <div class="tablewrap"><table><thead><tr><th>MARKT</th><th>STRATEGIE</th><th>URTEIL</th><th class="r">RENDITE %</th><th class="r">OOS %</th><th class="r">TREFFER %</th><th class="r">PF</th><th class="r">SHARPE</th><th class="r">DD %</th><th class="r">TRADES</th><th>WARUM (NICHT)?</th><th></th></tr></thead><tbody id="rs-rows"></tbody></table></div>
+</main>
+<main id="tab-set" hidden>
+  <div class="title"><span>EINSTELLUNGEN</span><span id="set-real"></span></div>
+  <div class="note">Hier änderst du, was sonst in <b>config.py</b> stehen würde. Gespeichert wird in <b>mt5bot_settings.json</b>. Die Sicherheitsgrenzen bleiben: Risiko höchstens 2 % je Trade, Stop-Loss und Ziel an jeder Order, Echtgeld-Konten nur, wenn du es von Hand in config.py erlaubst. Einstellungen sind nur am PC selbst änderbar, nicht vom Handy.</div>
+  <div id="set-form"></div>
+  <div class="title" style="margin-top:22px"><span>PROFILE (STRATEGIEN)</span></div><div id="set-profiles"></div>
+  <div class="row2"><button class="go" id="set-save">Speichern &amp; übernehmen</button></div>
+  <div class="title" style="margin-top:22px"><span>WINDOWS-START</span></div><div id="app"></div>
+  <div class="title" style="margin-top:22px"><span>TELEGRAM</span></div><div id="tg"></div>
 </main>
 <script>
 "use strict";
@@ -368,6 +399,167 @@ load();
 loadHistory();
 setInterval(load, 15000);
 setInterval(loadHistory, 60000);
+</script>
+<script>
+"use strict";
+// ---- Reiter, Strategie-Prüfung, Einstellungen, Telegram-Einrichtung (alles ohne innerHTML) ----
+const LOCAL = document.querySelector('meta[name="local"]').content === "1";
+const KEYQ = typeof KEY === "string" ? KEY : "";
+const tabs = ["dash", "strat", "set"];
+function showTab(t) {
+  tabs.forEach((x) => { $("tab-" + x).hidden = x !== t; });
+  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.t === t));
+  if (t === "strat") loadResearch(); if (t === "set") loadSettings();
+  try { sessionStorage.setItem("tab", t); } catch (e) {}
+}
+document.querySelectorAll("#tabs button").forEach((b) => { b.onclick = () => showTab(b.dataset.t); });
+async function api(path, body, big) {
+  const opt = body ? { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF": CSRF, ...(big ? { "X-Big": "1" } : {}) }, body: JSON.stringify(body) } : { cache: "no-store" };
+  const r = await fetch(path + KEYQ, opt);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.text || `Fehler ${r.status}`);
+  return j;
+}
+async function command(cmd, big) {   // sendet, wartet auf das Ergebnis des Bots (läuft im Hauptfaden)
+  const j = await api("/api/command", cmd, big);
+  for (let i = 0; i < 40; i++) {
+    await new Promise((res) => setTimeout(res, 800));
+    const q = await (await fetch("/api/result" + (KEYQ ? KEYQ + "&" : "?") + "id=" + j.id, { cache: "no-store" })).json();
+    if (q.done) return q.text;
+  }
+  return "Keine Antwort vom Bot – läuft er?";
+}
+const MODEHELP = {
+  strict: "Streng: Rendite ≥ 2 %, Drawdown ≤ 15 %, Sharpe ≥ 1, Trefferquote ≥ 55 %, Profitfaktor ≥ 1,2, mind. 20 Trades und im Out-of-Sample-Teil nicht im Minus. Alle 35 Standard-Strategien werden getestet.",
+  explore: "Locker (Erkunden): Rendite ≥ 0 %, Drawdown ≤ 25 %, Trefferquote ≥ 35 %, Profitfaktor ≥ 1,0, mind. 8 Trades. Mehr Treffer, aber auch mehr Zufall – nur für Demo.",
+  playbook: "Playbook: 5 feste Strategien aus „Die 10 besten Trading Strategien“ (Ausbruch, Pullback, Inside Bar, Range, Bollinger). Strenge Schwellen.",
+  winrate: "Winrate-5: 5 Varianten mit hoher Trefferquote. Hohe Trefferquote allein heißt nicht Gewinn – die Schwellen entscheiden.",
+  final: "Final-3: die drei Strategien aus dem Massen-Test auf Tageskerzen (Connors RSI 2, Video-Methode, IBS).",
+};
+let rsTimer = null, rsData = null;
+function fmt(x, d = 1) { return x == null ? "–" : num(x, d); }
+async function loadResearch() {
+  let j; try { j = await api("/api/research"); } catch (e) { return toast(e.message); }
+  rsData = j.data || {}; const st = j.state || {};
+  const modes = (await api("/api/settings")).modes;
+  const sel = $("rs-mode"); if (!sel.options.length) { modes.forEach((m) => { const o = h("option", null, m); o.value = m; sel.append(o); }); sel.value = rsData.mode || "strict"; sel.onchange = () => { $("rs-modehelp").textContent = MODEHELP[sel.value] || ""; }; sel.onchange(); }
+  $("rs-time").textContent = rsData.time ? `letzte Prüfung ${new Date(rsData.time).toLocaleString("de-DE")} (${rsData.mode}, ${rsData.bars} Kerzen)` : "noch keine Prüfung";
+  const running = !!st.running;
+  $("rs-go").disabled = running || !CONTROL; $("rs-stop").hidden = !running || !CONTROL;
+  $("rs-bar").style.width = running ? Math.round(100 * (st.done || 0) / Math.max(1, st.total || 1)) + "%" : (st.finished ? "100%" : "0");
+  $("rs-label").textContent = (st.label || "") + (st.missing && st.missing.length ? ` | nicht beim Broker gefunden: ${st.missing.join(", ")}` : "");
+  clearTimeout(rsTimer); if (running && !$("tab-strat").hidden) rsTimer = setTimeout(loadResearch, 1500);
+  const act = $("rs-active"); act.replaceChildren();
+  const list = rsData.active || [];
+  if (!list.length) act.append(h("div", "empty", "Keine Strategie aktiv. Prüfung starten – nur zugelassene (oder von dir angehakte) Strategien handeln im Profil „auto“."));
+  list.forEach((a) => {
+    const c = h("div", "pc"); c.append(h("b", null, `${a.market} ${a.tf} – ${a.title}`), h("span", "badge prof", a.source === "manual" ? " von Hand" : " automatisch"), " ");
+    if (CONTROL && LOCAL) { const b = h("button", "danger", "Entfernen"); b.onclick = () => toggle(a.market, a.tf, a.type, a.params, a.title, false); c.append(b); }
+    act.append(c);
+  });
+  const body = $("rs-rows"); body.replaceChildren();
+  const rows = (rsData.results || []).filter((r) => !$("rs-onlyok").checked || r.ok).sort((a, b) => (b.ok - a.ok) || ((b.score ?? -99) - (a.score ?? -99)));
+  rows.slice(0, 400).forEach((r) => {
+    const m = r.metrics, tr = h("tr"), isAct = list.some((a) => a.market === r.market && a.type === r.type && JSON.stringify(a.params) === JSON.stringify(r.params));
+    tr.append(h("td", null, `${r.market} ${r.tf}`), h("td", null, r.name || r.title), h("td", r.ok ? "ok" : "no", r.ok ? "✔ zugelassen" : "✘ nein"),
+      h("td", "r", m ? fmt(m.return_pct) : "–"), h("td", "r", m ? fmt(m.oos_return_pct) : "–"), h("td", "r", m ? fmt(m.win_rate_pct, 0) : "–"), h("td", "r", m ? fmt(m.profit_factor) : "–"),
+      h("td", "r", m ? fmt(m.sharpe) : "–"), h("td", "r", m ? fmt(m.max_drawdown_pct) : "–"), h("td", "r", m ? fmt(m.trades, 0) : "–"),
+      h("td", "why", r.ok ? (r.advice || "") : (r.failures || []).join("; ") + (r.advice ? " → " + r.advice : "")));
+    const last = h("td");
+    if (m && CONTROL && LOCAL) { const b = h("button", null, isAct ? "Entfernen" : r.ok ? "Aktivieren" : "Trotzdem aktivieren"); b.onclick = () => toggle(r.market, r.tf, r.type, r.params, r.title, !isAct); last.append(b); }
+    tr.append(last); body.append(tr);
+  });
+}
+async function toggle(market, tf, strategy, params, title, on) {
+  if (on) { const ok = await dialog("Strategie aktivieren", `${market} ${tf}: ${title}\n\nDie App handelt sie dann auf dem Demo-Konto (1 % Risiko, Stop-Loss und Ziel an jeder Order).`, { ok: "Aktivieren" }); if (!ok) return; }
+  try { toast(await command({ type: "research_toggle", market, tf, strategy, params, title, on })); } catch (e) { toast(e.message); }
+  loadResearch();
+}
+$("rs-go").onclick = async () => { try { toast(await command({ type: "research", mode: $("rs-mode").value })); } catch (e) { toast(e.message); } loadResearch(); };
+$("rs-stop").onclick = async () => { try { toast(await command({ type: "research_cancel" })); } catch (e) { toast(e.message); } };
+$("rs-onlyok").onchange = () => loadResearch();
+
+let setView = null;
+async function loadSettings() {
+  try { setView = await api("/api/settings"); } catch (e) { return toast(e.message); }
+  $("set-real").textContent = setView.real_account_allowed ? "ACHTUNG: Echtgeld-Konten sind in config.py erlaubt" : "nur Demo-Konten (Sicherheitssperre aktiv)";
+  const form = h("div", "form"); form.id = "setgrid";
+  Object.entries(setView.general).forEach(([key, f]) => {
+    let inp;
+    if (f.type === "bool") { inp = h("input"); inp.type = "checkbox"; inp.checked = !!f.value; }
+    else if (f.type === "choice") { inp = h("select"); f.choices.forEach((c) => { const o = h("option", null, c); o.value = c; inp.append(o); }); inp.value = f.value; }
+    else if (f.type === "string") { inp = h("input"); inp.type = "text"; inp.value = f.value || ""; }
+    else { inp = h("input"); inp.type = "number"; inp.step = f.type === "int" ? "1" : "any"; inp.min = f.min; inp.max = f.max; inp.value = f.value; }
+    inp.dataset.key = key; inp.dataset.type = f.type; inp.disabled = !(CONTROL && LOCAL);
+    form.append(h("label", null, f.label), inp); if (f.hint) form.append(h("small", null, f.hint));
+  });
+  $("set-form").replaceChildren(form);
+  const pr = $("set-profiles"); pr.replaceChildren();
+  setView.profiles.forEach((p) => {
+    const c = h("div", "pc"); c.dataset.name = p.name;
+    const en = h("input"); en.type = "checkbox"; en.checked = p.enabled; en.className = "p-en";
+    const risk = h("input"); risk.type = "number"; risk.step = "0.05"; risk.min = 0.05; risk.max = 2; risk.value = p.risk_percent; risk.className = "p-risk"; risk.style.width = "90px";
+    const mk = h("input"); mk.type = "text"; mk.className = "p-mk"; mk.style.width = "100%"; mk.value = Object.entries(p.markets).map(([k, v]) => `${k}:${v}`).join(", ");
+    const head = h("div", "row2"); head.append(en, h("b", null, p.name), h("span", "badge prof", p.strategy), h("span", "badge prof", "Magic " + p.magic), h("label", null, "Risiko % "), risk);
+    if (p.auto) { const md = h("select"); md.className = "p-mode"; setView.modes.forEach((m) => { const o = h("option", null, m); o.value = m; md.append(o); }); md.value = p.mode || "strict"; head.append(h("label", null, "Modus "), md); }
+    [en, risk, mk].forEach((e) => { e.disabled = !(CONTROL && LOCAL); }); const md2 = head.querySelector(".p-mode"); if (md2) md2.disabled = !(CONTROL && LOCAL);
+    c.append(head, h("small", "note", "Märkte (Symbol:Zeitrahmen, mit Komma getrennt – Zeitrahmen " + setView.timeframes.join(", ") + ")"), mk); pr.append(c);
+  });
+  loadApp(); loadTelegram();
+}
+function collect() {
+  const general = {}, profiles = {};
+  document.querySelectorAll("#setgrid [data-key]").forEach((e) => { general[e.dataset.key] = e.dataset.type === "bool" ? e.checked : e.dataset.type === "string" || e.dataset.type === "choice" ? e.value : Number(e.value); });
+  document.querySelectorAll("#set-profiles .pc").forEach((c) => {
+    const markets = {};
+    c.querySelector(".p-mk").value.split(",").map((x) => x.trim()).filter(Boolean).forEach((x) => { const [k, v] = x.split(":"); markets[(k || "").trim().toUpperCase()] = (v || "").trim().toUpperCase(); });
+    profiles[c.dataset.name] = { enabled: c.querySelector(".p-en").checked, risk_percent: Number(c.querySelector(".p-risk").value), markets };
+    const md = c.querySelector(".p-mode"); if (md) profiles[c.dataset.name].mode = md.value;
+  });
+  return { general, profiles };
+}
+$("set-save").onclick = async () => {
+  if (!(CONTROL && LOCAL)) return toast("Einstellungen sind nur am PC selbst änderbar.");
+  try { toast(await command({ type: "save_settings", overlay: collect() }, true), 9000); } catch (e) { toast(e.message, 9000); }
+  loadSettings();
+};
+async function loadApp() {
+  const box = $("app"); box.replaceChildren();
+  let a = {}; try { a = await api("/api/app"); } catch (e) { return; }
+  if (!a.windows) return box.append(h("div", "note", "Autostart gibt es nur unter Windows."));
+  box.append(h("div", "note", a.autostart ? "Die App startet automatisch beim Windows-Anmelden." : "Die App startet nicht automatisch. Damit sie nach einem Neustart von selbst läuft: einschalten (Windows muss sich automatisch anmelden, MetaTrader sollte ebenfalls beim Start laufen)."));
+  if (!(CONTROL && LOCAL)) return;
+  const b = h("button", a.autostart ? "danger" : "go", a.autostart ? "Autostart ausschalten" : "Autostart einschalten");
+  b.onclick = async () => { try { toast(await command({ type: "autostart", on: !a.autostart })); } catch (e) { toast(e.message); } loadApp(); };
+  box.append(b);
+}
+async function loadTelegram() {
+  const box = $("tg"); box.replaceChildren();
+  let st = {}; try { st = await api("/api/telegram"); } catch (e) {}
+  box.append(h("div", "note", st.configured ? (st.running ? "Telegram ist verbunden." : "Zugangsdaten gespeichert, aber nicht verbunden (Telegram in den Einstellungen einschalten oder neu verbinden).") : "Telegram ist noch nicht eingerichtet. So geht's: In Telegram @BotFather öffnen → /newbot → Namen wählen → den Token hier einfügen. Der Token bleibt auf diesem PC und wird nicht angezeigt."));
+  if (!(CONTROL && LOCAL)) return;
+  const tok = h("input"); tok.type = "password"; tok.placeholder = "Token von @BotFather"; tok.autocomplete = "off";
+  const go = h("button", null, st.configured ? "Neu einrichten" : "Prüfen"), out = h("div", "note");
+  go.onclick = async () => {
+    try {
+      const c = await api("/api/telegram", { step: "check", token: tok.value }); tok.value = "";
+      out.textContent = `Bot @${c.bot} gefunden. Schick ihm jetzt in Telegram eine Nachricht (z. B. /start) – ich warte …`;
+      for (let i = 0; i < 60; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const f = (await api("/api/telegram", { step: "find" })).found;
+        if (f) {
+          const ok = await dialog("Telegram verbinden", `Nachricht von ${f.name} (Chat-ID ${f.chat_id}). Das bist du? Nur dieser Chat darf den Bot steuern.`, { ok: "Ja, das bin ich" });
+          if (!ok) return (out.textContent = "Abgebrochen.");
+          await api("/api/telegram", { step: "save", chat_id: f.chat_id }); out.textContent = "Gespeichert – Telegram wird verbunden. Der Bot hat dir eine Nachricht geschickt."; return setTimeout(loadTelegram, 3000);
+        }
+      }
+      out.textContent = "Keine Nachricht erhalten. Nochmal versuchen.";
+    } catch (e) { out.textContent = e.message; }
+  };
+  box.append(h("div", "row2"), tok, go, out);
+}
+let t0 = "dash"; try { t0 = sessionStorage.getItem("tab") || "dash"; } catch (e) {}
+showTab(tabs.includes(t0) ? t0 : "dash");
 </script>
 </body>
 </html>

@@ -132,3 +132,87 @@ def test_web_commands_save_settings_and_toggle(tmp_path):
     cid = r.submit_web_command({"type": "save_settings", "overlay": {"general": {"max_open_positions": 99}}})
     r.process_web_commands()
     assert r.web_results[cid]["text"].startswith("Fehler") and r.cfg.MAX_OPEN_POSITIONS == 4
+
+
+def _serve(r, tmp_path, tg_setup=None):
+    from mt5bot.dashboard import serve
+    info = serve(tmp_path, 0, open_browser=False, control="local", submit=r.submit_web_command, results=r.web_results, symbols=lambda: sorted(r.symbols),
+                 research_state=lambda: r.research_state, tg_status=r.tg_status, tg_setup=tg_setup)
+    return info, f"http://127.0.0.1:{info['server'].server_address[1]}"
+
+
+def test_portal_settings_research_and_pwa_endpoints(tmp_path):
+    import json
+    import urllib.error
+    import urllib.request
+    r, mt5 = app_runner(tmp_path, {"XAUUSD": bars(list(np.linspace(100, 200, 700)))})
+    r.connect()
+    info, base = _serve(r, tmp_path)
+    try:
+        html = urllib.request.urlopen(base + "/").read().decode()
+        token = html.split('name="csrf" content="')[1].split('"')[0]
+        assert 'rel="manifest"' in html and "__QS__" not in html and "__LOCAL__" not in html and 'name="local" content="1"' in html
+        man = json.loads(urllib.request.urlopen(base + "/manifest.webmanifest").read())
+        assert man["display"] == "standalone" and man["icons"]
+        assert b"<svg" in urllib.request.urlopen(base + "/icon.svg").read()
+        assert json.loads(urllib.request.urlopen(base + "/api/settings").read())["real_account_allowed"] is False
+        assert json.loads(urllib.request.urlopen(base + "/api/research").read())["state"]["running"] is False
+        assert json.loads(urllib.request.urlopen(base + "/api/telegram").read())["configured"] is False
+
+        def post(path, body, extra=None):
+            h = {"Content-Type": "application/json", "X-CSRF": token, **(extra or {})}
+            return urllib.request.urlopen(urllib.request.Request(base + path, data=json.dumps(body).encode(), headers=h, method="POST"))
+        with pytest.raises(urllib.error.HTTPError) as e:     # ungültige Werte werden schon vom Portal abgelehnt, mit lesbarer Meldung
+            post("/api/command", {"type": "save_settings", "overlay": {"general": {"daily_loss_limit_pct": 99}}}, {"X-Big": "1"})
+        assert e.value.code == 400 and "erlaubt" in json.loads(e.value.read())["text"]
+        cid = json.loads(post("/api/command", {"type": "save_settings", "overlay": {"general": {"max_open_positions": 2}}}, {"X-Big": "1"}).read())["id"]
+        r.process_web_commands()
+        assert r.cfg.MAX_OPEN_POSITIONS == 2 and "Gespeichert" in r.web_results[cid]["text"]
+        with pytest.raises(urllib.error.HTTPError) as e:
+            post("/api/command", {"type": "research", "mode": "boese"})
+        assert e.value.code == 400
+        with pytest.raises(urllib.error.HTTPError) as e:     # ohne X-Big nur 2 KB
+            post("/api/command", {"type": "save_settings", "overlay": {"general": {"terminal_path": "x" * 3000}}})
+        assert e.value.code == 400
+        cid = json.loads(post("/api/command", {"type": "research", "mode": "final"}).read())["id"]
+        r.process_web_commands()
+        assert "gestartet" in r.web_results[cid]["text"] or "Keine Kurse" in r.web_results[cid]["text"]
+    finally:
+        info["server"].shutdown()
+
+
+def test_portal_telegram_setup_steps_never_return_token(tmp_path, monkeypatch):
+    import json
+    import urllib.request
+    from mt5bot import telegram_setup
+    r, mt5 = app_runner(tmp_path, {"XAUUSD": bars(list(np.linspace(100, 200, 700)))})
+
+    class FakeApi:
+        sent = []
+
+        def __init__(self, token):
+            pass
+
+        def call(self, method, params=None, timeout=0):
+            if method == "getMe":
+                return {"result": {"username": "mein_bot"}}
+            if method == "getUpdates":
+                return {"result": [{"update_id": 1, "message": {"chat": {"id": 42, "type": "private", "first_name": "Ich"}, "date": time.time()}}] if params and params.get("timeout") == 0 else []}
+            FakeApi.sent.append(method)
+            return {"ok": True}
+    monkeypatch.setattr(telegram_setup, "TelegramApi", FakeApi)
+    info, base = _serve(r, tmp_path, telegram_setup.WebSetup(tmp_path))
+    try:
+        token = urllib.request.urlopen(base + "/").read().decode().split('name="csrf" content="')[1].split('"')[0]
+
+        def post(body):
+            req = urllib.request.Request(base + "/api/telegram", data=json.dumps(body).encode(), headers={"Content-Type": "application/json", "X-CSRF": token}, method="POST")
+            return urllib.request.urlopen(req).read().decode()
+        out = post({"step": "check", "token": "123456:ABCDEF"})
+        assert "mein_bot" in out and "ABCDEF" not in out
+        found = json.loads(post({"step": "find"}))["found"]
+        assert found["chat_id"] == "42"
+        out = post({"step": "save", "chat_id": "42"})
+        assert "ABCDEF" not in out and (tmp_path / "mt5bot_telegram.json").exists() and "sendMessage" in FakeApi.sent
+    finally:
+        info["server"].shutdown()
