@@ -25,6 +25,24 @@ export function decorate(text) {
   return text;
 }
 
+// ---- Protokoll-Kanal: viele kleine Zeilen werden gesammelt und gebündelt gesendet (Discord erlaubt nur wenige Anfragen pro Sekunde) ----
+const logQueue = new Map();
+export function queueLog(webhook, line) {
+  const q = logQueue.get(webhook) || [];
+  q.push(line);
+  logQueue.set(webhook, q.slice(-400));   // Obergrenze, falls Discord nicht erreichbar ist
+}
+
+export async function flushLogs(fetchFn = fetch) {
+  for (const [hook, lines] of [...logQueue]) {
+    logQueue.delete(hook);
+    for (const part of chunkText(lines.join("\n"), 1850)) {
+      try { await sendDiscord(hook, "```\n" + part.replaceAll("```", "ʼʼʼ") + "\n```", fetchFn, "Trading-Bot Log"); }
+      catch (e) { console.warn("Discord-Log:", e.message); break; }
+    }
+  }
+}
+
 export async function sendDiscord(webhook, text, fetchFn = fetch, username = "Trading-Bot") {
   for (const part of chunkText(text)) {
     const resp = await fetchFn(webhook, { method: "POST", headers: { "content-type": "application/json" },

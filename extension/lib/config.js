@@ -80,7 +80,8 @@ export const DEFAULTS = {
   telegram: { enabled: false, token: "", chatId: "" },
   // Discord: webhook = Meldungen (Kauf/Verkauf mit Stop, Ziel, Begründung; Stundenbericht). botToken + channelId = Knöpfe für die Live-Statistik
   // (Klicks gehen von überall, der Bot verbindet sich nur ausgehend). liveMessage = eine Nachricht im Kanal, die sich jede Minute selbst aktualisiert.
-  discord: { enabled: false, webhook: "", botToken: "", channelId: "", liveMessage: false },
+  discord: { enabled: false, webhook: "", botToken: "", channelId: "", liveMessage: false,
+    logEnabled: false, logWebhook: "", logLevel: "all" }, // zweiter Webhook NUR für Protokolle (alle Entscheidungen, Fehler, Ereignisse); logLevel: all | important (Handel, Warnungen, Fehler)
 };
 
 // Mindestkosten je Order (Gebühr/Spread + Rutschen, in %) – weit über den echten Kosten, damit Backtest und Paper-Handel eher zu pessimistisch sind.
@@ -141,6 +142,8 @@ export function validateConfig(c) {
   if (!(c.trail.lockFraction >= 0.3 && c.trail.lockFraction <= 0.95)) fail("Trailing: gesicherter Gewinnanteil muss zwischen 0,3 und 0,95 liegen.");
   if (c.discord.channelId && !/^\d{5,25}$/.test(c.discord.channelId)) fail("Discord-Kanal-ID ungültig (nur Ziffern; Kanal rechtsklicken → „Kanal-ID kopieren“, Entwicklermodus nötig).");
   if (c.discord.botToken && !/^[\w.-]{30,120}$/.test(c.discord.botToken)) fail("Discord-Bot-Token ungültig.");
+  if (c.discord.logWebhook && !WEBHOOK_RE.test(c.discord.logWebhook)) fail("Log-Webhook ungültig (erwartet: https://discord.com/api/webhooks/<Zahl>/<Schlüssel>).");
+  if (!["all", "important"].includes(c.discord.logLevel)) fail("Log-Stufe muss all oder important sein.");
   if (c.discord.webhook && !WEBHOOK_RE.test(c.discord.webhook)) fail("Discord-Webhook ungültig (erwartet: https://discord.com/api/webhooks/<Zahl>/<Schlüssel>).");
   if (!(Number.isInteger(c.pipeline.maxActiveStrategies) && c.pipeline.maxActiveStrategies >= 1)) fail("Anzahl aktiver Strategien muss eine ganze Zahl >= 1 sein.");
   if (!(c.backtest.oosFraction > 0 && c.backtest.oosFraction < 1)) fail("oosFraction muss in (0, 1) liegen.");

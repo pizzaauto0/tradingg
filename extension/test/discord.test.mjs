@@ -94,3 +94,50 @@ test("Hilfsfunktionen: lange Texte werden geteilt, Köpfe verziert", () => {
   assert.match(decorate("EXIT SOL/USD | PnL -1.00"), /^🔴/);
   assert.match(decorate("WARNUNG: x"), /^⚠️/);
 });
+
+const LOGHOOK = "https://discord.com/api/webhooks/222222222222222222/logLOG_hook-XYZ";
+
+test("Log-Webhook: eigener Kanal, gebündelt, mit Entscheidungen, Handel, Aktionen und Fehlern; Stufe important lässt Entscheidungen weg", async () => {
+  installFakeChrome();
+  await assert.rejects(handle({ type: "saveConfig", patch: { discord: { logWebhook: "https://evil.example/x" } } }), /Log-Webhook/);
+  await assert.rejects(handle({ type: "saveConfig", patch: { discord: { logLevel: "viel" } } }), /Log-Stufe/);
+  await handle({ type: "saveConfig", patch: { ...permissive, assets: ["SOL"], discord: { enabled: true, webhook: HOOK, logEnabled: true, logWebhook: LOGHOOK } } });
+  const c = await handle({ type: "getConfig" });
+  assert.equal(c.discord.logWebhook, "***"); assert.ok(!JSON.stringify(c).includes("logLOG"));
+  const world = { dfs: { "SOL/USD": trend(1500) } }, inner = marketFetch(world), trade = [], logs = [];
+  const f = async (url, opt) => {
+    if (String(url) === HOOK) { trade.push(JSON.parse(opt.body).content); return { ok: true, status: 204, json: async () => ({}) }; }
+    if (String(url) === LOGHOOK) { logs.push(JSON.parse(opt.body).content); return { ok: true, status: 204, json: async () => ({}) }; }
+    return inner(url, opt);
+  };
+  await handle({ type: "testDiscordLog" }, f);
+  assert.match(logs[0], /Log-Webhook funktioniert/); logs.length = 0;
+  await handle({ type: "research" }, f);
+  const key = "botState_paper", st = (await chrome.storage.local.get(key))[key];
+  st.approved = [{ symbol: "SOL/USD", timeframe: "15m", spec: { type: "breakout", params: { lookback: 10, exit_lookback: 5 }, regimes: ["uptrend"] }, name: "breakout(10,5)", metrics: { sharpe: 2, return_pct: 5 } }];
+  st.lastRefresh = new Date().toISOString();
+  await chrome.storage.local.set({ [key]: st });
+  await handle({ type: "start" }, f); await whenIdle();
+  const t1 = world.dfs["SOL/USD"].t.at(-1);
+  await runTick({ fetchFn: f, now: at(t1) });
+  world.dfs = { "SOL/USD": shifted(trend(1501, true)) };
+  await runTick({ fetchFn: f, now: at(world.dfs["SOL/USD"].t.at(-1)) });
+  const all = logs.join("\n");
+  assert.ok(logs.every((m) => m.startsWith("```") && m.endsWith("```") && m.length <= 2000), "gebündelt im Codeblock");
+  assert.match(all, /Bot gestartet/); assert.match(all, /Strategien wurden neu geprüft/);
+  assert.match(all, /SOL\/USD · Kerze .* · /, "Entscheidung je Kerze");
+  assert.match(all, /\$ PAPER ENTRY SOL\/USD/); assert.match(all, /Warum gekauft/);
+  assert.ok(!trade.some((m) => /Kerze .* · /.test(m)), "Entscheidungen gehen nicht in den Handels-Kanal");
+  assert.ok(!all.includes(HOOK) && !all.includes("logLOG"), "keine Webhook-Adressen im Log");
+  // nur wichtige Zeilen
+  await handle({ type: "saveConfig", patch: { discord: { logLevel: "important" } } }, f);
+  logs.length = 0;
+  world.dfs = { "SOL/USD": shifted(trend(1502, true), 2) };
+  await runTick({ fetchFn: f, now: at(world.dfs["SOL/USD"].t.at(-1)) });
+  assert.ok(!/ · Kerze .* · /.test(logs.join("\n")), "important: keine Kerzen-Entscheidungen");
+  // Fehler landen im Log
+  world.dfs = {};
+  logs.length = 0;
+  await runTick({ fetchFn: f, now: at(world.dfs["SOL/USD"]?.t?.at(-1) ?? T0 + 4 * TF_MS) });
+  assert.match(logs.join("\n"), /X PAPER Fehler im Durchlauf|! PAPER SOL\/USD: Daten nicht ladbar/);
+});

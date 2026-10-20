@@ -38,6 +38,11 @@ Einstellungen (⚙ in irgendeinem Tab) → *Discord-Meldungen*: Webhook-URL einf
 - Warnungen (Not-Aus, Tageslimit, Fehler).
 Die Webhook-URL gehört nicht ins Repository und nicht in Chats: wer sie kennt, kann in deinen Kanal schreiben. Bei Verdacht in Discord löschen und neu anlegen.
 
+## Log-Webhook (eigener Kanal für Protokolle)
+⚙ Einstellungen → *Discord-Meldungen* → **Log-Kanal aktiv**, **Log-Webhook-URL** (am besten ein eigener Kanal, z. B. #logs), speichern, *Log-Webhook testen*. Unabhängig vom Webhook für Handelsmeldungen.
+Dorthin kommt, gebündelt in Codeblöcken (höchstens ein Versand pro Durchlauf alle 30 s): jede Entscheidung je Kerze („warum kein Kauf“), Handel (Kauf/Verkauf/Stop-Nachziehen), Warnungen, Fehler (z. B. Daten nicht ladbar) und Aktionen aus der App (Start/Stopp, Not-Aus, Einstellungen gespeichert – nur *welche* Felder, nie Werte oder Geheimnisse).
+*Log-Umfang*: **all** = alles inkl. jeder geprüften Kerze (viel Text), **important** = nur Handel, Warnungen, Fehler. Die Webhook-Adresse ist ein Geheimnis wie die andere.
+
 ## Dashboard: kaufen, verkaufen, Stop-Loss/Take-Profit verschieben
 Im Dashboard (📈 im jeweiligen Tab) steht neben dem Chart die Karte **Handeln**:
 - **Kaufen** (nur Paper): Betrag in USD, Stop-Loss und Take-Profit optional (leer = Betrag nach Risikoregel, Stop 2×ATR, Ziel nach Regel). Gebühren sind eingerechnet; harte Grenzen: höchstens 2 % Risiko, maximale Positionsgröße, Positionslimit.

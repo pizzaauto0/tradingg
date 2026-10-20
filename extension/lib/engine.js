@@ -26,6 +26,8 @@ export class Engine {
 
   // Eigenkapital = Bargeld + Wert der eigenen Positionen + (bei gemeinsamem Paper-Konto) Wert der Positionen der anderen Bots.
   // Den eigenen Positionswert merkt sich das Konto, damit die anderen Bots ihn kennen.
+  log(level, text) { this.notify?.log?.(text, level); }   // Protokoll-Kanal (Discord), siehe controller.makeNotifier
+
   async equity() {
     let own = 0;
     for (const [sym, p] of Object.entries(this.state.positions)) own += p.amount * (this.lastPrices[sym] ?? p.entryPrice);
@@ -69,6 +71,7 @@ export class Engine {
       } catch (e) {
         state.activity[sym] = { ts: now.toISOString(), error: e.message };
         console.warn(`${sym}: Daten nicht ladbar: ${e.message}`);
+        this.log("warn", `${sym}: Daten nicht ladbar: ${e.message}`);
       }
     }
     if (!Object.keys(data).length) throw new Error("Keine Marktdaten erhalten");
@@ -352,6 +355,7 @@ export class Engine {
         : !sel ? `${market.regime}: keine zugelassene Strategie für diese Marktphase → warte`
         : `${market.regime}: ${sel.strategy.name} → Signal ${signal ? "JA" : "nein"}`;
       const log = this.state.decisions ||= [];
+      this.log("info", `${sym} · Kerze ${new Date(stamp).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })} · ${what}${this.state.positions[sym] ? " · Position offen" : ""}${this.risk.halted ? " · Tageslimit aktiv" : ""}`);
       log.push({ ts: now.toISOString(), symbol: sym, text: `${sym} · Kerze geprüft · ${what}${this.state.positions[sym] ? " · Position offen" : ""}${this.risk.halted ? " · Tageslimit aktiv" : ""}` });
       this.state.decisions = log.slice(-40);
     }
@@ -362,7 +366,7 @@ export class Engine {
   async lookForEntry(sym, { closed, live, isNew }, now, obs) {
     if (this.state.positions[sym] || this.exitedThisTick.has(sym) || !isNew) return;
     const [ok, why] = this.risk.canOpen(Object.keys(this.state.positions).length);
-    if (!ok) { console.info("Kein Einstieg:", why); return; }
+    if (!ok) { console.info("Kein Einstieg:", why); this.log("info", `${sym}: Signal geprüft, aber kein Einstieg: ${why}`); return; }
     const { market, sel, signal } = obs;
     if (!market || !sel || !signal) return;
     const { strategy } = sel;
@@ -374,7 +378,7 @@ export class Engine {
     const equity = await this.equity();
     const raw = positionSize(this.risk.sizingEquity(equity), await this.broker.cash(), price, stop, this.cfg.risk, this.cfg.costs);
     const amount = floorTo(raw, price > 1000 ? 6 : 5);
-    if (amount * price < MIN_NOTIONAL_USD) { console.info(`${sym}: Positionsgröße unter Minimum (${(amount * price).toFixed(2)} USD)`); return; }
+    if (amount * price < MIN_NOTIONAL_USD) { console.info(`${sym}: Positionsgröße unter Minimum (${(amount * price).toFixed(2)} USD)`); this.log("info", `${sym}: Positionsgröße unter Minimum (${(amount * price).toFixed(2)} USD) – kein Kauf`); return; }
 
     const riskCash = amount * (price - stop);
     const reason = `${sel.record.explore ? "EXPERIMENTELL (Strategie hat die strengen Prüfungen NICHT bestanden/wurde nicht geprüft): " : ""}${sel.record.title ? `${sel.record.title} – ` : ""}${strategy.explain(closed)}; Marktphase: ${summarize(market)}; Stop ${fmtPx(stop)} ` +

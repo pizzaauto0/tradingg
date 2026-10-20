@@ -10,7 +10,7 @@ import { createVault, decryptVault, deleteVault, getUnlockedKey, hasVault, lock,
 import { b58encode } from "./util.js";
 import { summarizeFailures } from "./diagnose.js";
 import { HELP, formatStatus, pollCommands } from "./telegram.js";
-import { decorate, sendDiscord } from "./discord.js";
+import { decorate, flushLogs, queueLog, sendDiscord } from "./discord.js";
 import { DiscordBot, postPanel } from "./discordbot.js";
 import { buildStatsEmbed } from "./stats.js";
 
@@ -95,8 +95,17 @@ export function makeNotifier(cfg, fetchFn = fetch, botId = DEFAULT_BOT) {
   const discord = (text) => cfg.discord?.enabled && cfg.discord.webhook
     ? sendDiscord(cfg.discord.webhook, `**[${cfg.liveTrading ? "LIVE" : "PAPER"}${isDefault(botId) ? "" : " · " + BOTS[botId].label}]** ${decorate(text)}`, fetchFn).catch((e) => console.warn("Discord:", e.message))
     : null;
+  // Protokoll-Webhook: level info (jede Entscheidung) | trade | warn | error; Stufe „important“ lässt info weg
+  const logTo = (text, level = "info") => {
+    const d = cfg.discord;
+    if (!d?.logEnabled || !d.logWebhook || (d.logLevel === "important" && level === "info")) return;
+    const bot = isDefault(botId) ? "" : `${BOTS[botId].label} `;
+    const icon = { info: "·", trade: "$", warn: "!", error: "X" }[level] || "·";
+    queueLog(d.logWebhook, `${new Date().toLocaleTimeString("de-DE")} ${icon} ${cfg.liveTrading ? "LIVE" : "PAPER"} ${bot}${text}`);
+  };
   const notify = async (text) => {
     console.info("NOTIFY:", tag + text);
+    logTo(text, /^(WARNUNG|NOT-AUS|Tagesverlust)/.test(text) ? "warn" : /^(ENTRY|EXIT|TRAIL|TESTTRADE|STOP\/ZIEL)/.test(text) ? "trade" : "info");
     await pushLog(text, botId);
     if (/^(WARNUNG|NOT-AUS|ENTRY|EXIT|Tagesverlust)/.test(text) && globalThis.chrome?.notifications) {
       chrome.notifications.create({ type: "basic", iconUrl: "icons/icon128.png", title: `Trading-Bot [${cfg.liveTrading ? "LIVE" : "PAPER"}]`, message: (tag + text.split("\n")[0]).slice(0, 250) });
@@ -110,6 +119,7 @@ export function makeNotifier(cfg, fetchFn = fetch, botId = DEFAULT_BOT) {
     }
     await discord(text);
   };
+  notify.log = logTo;
   notify.report = async (text) => { console.info("REPORT:", tag + text.split("\n")[0]); await discord(text); }; // Stundenbericht: nur Discord, nicht Telegram/Ereignisliste
   return notify;
 }
@@ -124,6 +134,7 @@ export function runTick(opts = {}) {
 // Alle Bots nacheinander (sie teilen sich das Paper-Konto, deshalb nie gleichzeitig). Ein Fehler in einem Bot stoppt die anderen nicht.
 async function tickAll(opts) {
   for (const id of BOT_IDS) await tickOnce(id, opts);
+  await flushLogs(opts?.fetchFn);
   await updateLiveMessage(opts?.fetchFn).catch((e) => console.warn("Discord-Live-Nachricht:", e.message));
 }
 
@@ -215,6 +226,7 @@ async function tickOnce(botId, { fetchFn = fetch, now = new Date() } = {}) {
     console.error(e);
     if (state) {
       state.lastError = `${e.message}`;
+      makeNotifier(cfg, fetchFn, botId).log(`Fehler im Durchlauf: ${e.message}`, "error");
       await setLocal(stateKey(cfg, botId), state);
       if (Date.now() - lastNoticeAt > 10 * 60_000) { lastNoticeAt = Date.now(); await makeNotifier(cfg, fetchFn, botId)(`WARNUNG: Fehler im Durchlauf: ${e.message}`); }
     }
@@ -257,7 +269,7 @@ export async function pollTelegram(fetchFn = fetch) {
 
 // ---- Aktionen aus dem Popup --------------------------------------------------------------------------------------
 const maskSecrets = (cfg) => ({ ...cfg, llm: { ...cfg.llm, apiKey: cfg.llm.apiKey ? "***" : "" }, telegram: { ...cfg.telegram, token: cfg.telegram.token ? "***" : "" },
-  discord: { ...cfg.discord, webhook: cfg.discord.webhook ? "***" : "", botToken: cfg.discord.botToken ? "***" : "" } });
+  discord: { ...cfg.discord, webhook: cfg.discord.webhook ? "***" : "", botToken: cfg.discord.botToken ? "***" : "", logWebhook: cfg.discord.logWebhook ? "***" : "" } });
 
 const ownRow = (botId) => (t) => (t.bot || DEFAULT_BOT) === botId;
 
@@ -295,7 +307,30 @@ export async function getAccount() {
   return { capital: main.capital.start, cash: acc.cash, held, equity, pnl: equity - main.capital.start, pnlPct: (equity / main.capital.start - 1) * 100, bots };
 }
 
+// Aktionen aus der Oberfläche landen (ohne Geheimnisse) im Protokoll-Kanal; danach werden gesammelte Logzeilen gesendet.
+const LOGGED = { start: "Bot gestartet", stop: "Bot gestoppt", kill: "NOT-AUS ausgelöst", killAll: "NOT-AUS für alle Bots ausgelöst", startAll: "Alle Bots gestartet", stopAll: "Alle Bots gestoppt",
+  research: "Strategien wurden neu geprüft", resetAccount: "Paper-Konto zurückgesetzt", saveConfig: "Einstellungen gespeichert", testTrade: "Testtrade ausgelöst" };
+
 export async function handle(msg, fetchFn = fetch) {
+  try {
+    const result = await handleInner(msg, fetchFn);
+    if (LOGGED[msg.type]) {
+      const cfg = await loadConfig(botOf(msg));
+      makeNotifier(cfg, fetchFn, botOf(msg)).log(`${LOGGED[msg.type]}${msg.type === "saveConfig" ? ` (geändert: ${Object.keys(msg.patch || {}).join(", ") || "–"})` : ""}`, /kill/i.test(msg.type) ? "warn" : "info");
+    }
+    return result;
+  } catch (e) {
+    if (LOGGED[msg?.type] || ["buy", "sell", "adjust"].includes(msg?.type)) {
+      const cfg = await loadConfig(botOf(msg)).catch(() => null);
+      if (cfg) makeNotifier(cfg, fetchFn, botOf(msg)).log(`Aktion „${msg.type}“ abgelehnt: ${e.message}`, "warn");
+    }
+    throw e;
+  } finally {
+    await flushLogs(fetchFn);
+  }
+}
+
+async function handleInner(msg, fetchFn = fetch) {
   const botId = botOf(msg);
   const cfg = await loadConfig(botId);
   switch (msg.type) {
@@ -314,6 +349,11 @@ export async function handle(msg, fetchFn = fetch) {
     case "testDiscord": {
       if (!cfg.discord.webhook) throw new Error("Kein Discord-Webhook eingetragen (zuerst speichern).");
       await sendDiscord(cfg.discord.webhook, "✅ Trading-Bot: Discord-Verbindung funktioniert. Hier kommen Käufe/Verkäufe (mit Stop, Ziel und Begründung) und jede Stunde ein Bericht, warum gekauft oder nicht gekauft wurde.", fetchFn);
+      return true;
+    }
+    case "testDiscordLog": {
+      if (!cfg.discord.logWebhook) throw new Error("Kein Log-Webhook eingetragen (zuerst speichern).");
+      await sendDiscord(cfg.discord.logWebhook, "📜 Trading-Bot: Log-Webhook funktioniert. Hier erscheinen Entscheidungen je Kerze, Handel, Fehler und Aktionen aus der App.", fetchFn, "Trading-Bot Log");
       return true;
     }
     case "startAll": { for (const id of BOT_IDS) await handle({ type: "start", bot: id }, fetchFn).catch(() => {}); return true; }

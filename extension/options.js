@@ -62,7 +62,10 @@ const SECTIONS = [
   ]],
   ["Discord-Meldungen (optional)", [
     ["discord.enabled", "Aktiv", "bool", "Schickt jeden Kauf und Verkauf (mit Stop-Loss, Take-Profit, Gebühren und Begründung) und jede Stunde einen Bericht, warum gekauft oder nicht gekauft wurde."],
-    ["discord.webhook", "Webhook-URL", "password", "Discord: Servereinstellungen → Integrationen → Webhooks → URL kopieren. Wird im App-Speicher abgelegt; wer die URL kennt, kann in den Kanal schreiben – nie weitergeben."],    ["discord.liveMessage", "Live-Nachricht im Kanal", "bool", "Eine Nachricht (per Webhook), die sich jede Minute mit der aktuellen Statistik aktualisiert – am besten anpinnen. Sichtbar auf jedem Gerät."],
+    ["discord.webhook", "Webhook-URL", "password", "Discord: Servereinstellungen → Integrationen → Webhooks → URL kopieren. Wird im App-Speicher abgelegt; wer die URL kennt, kann in den Kanal schreiben – nie weitergeben."],    ["discord.logEnabled", "Log-Kanal aktiv", "bool", "Zweiter Webhook NUR für Protokolle – getrennt von den Handelsmeldungen (z. B. eigener Kanal #logs)."],
+    ["discord.logWebhook", "Log-Webhook-URL", "password", "Eigener Webhook für den Log-Kanal. Dorthin kommen gebündelt: jede Kerzen-Entscheidung („warum kein Kauf“), Handel, Stop-Anpassungen, Warnungen, Fehler und Aktionen aus der App (ohne Geheimnisse)."],
+    ["discord.logLevel", "Log-Umfang", ["all", "important"], "all = alles inkl. jeder geprüften Kerze (viel Text). important = nur Handel, Warnungen, Fehler."],
+    ["discord.liveMessage", "Live-Nachricht im Kanal", "bool", "Eine Nachricht (per Webhook), die sich jede Minute mit der aktuellen Statistik aktualisiert – am besten anpinnen. Sichtbar auf jedem Gerät."],
     ["discord.botToken", "Bot-Token (für die Knöpfe)", "password", "Knöpfe gehen nur mit einem eigenen Discord-Bot (Webhooks können keine): discord.com/developers/applications → New Application → Bot → Token kopieren → unter OAuth2/URL-Generator „bot“ mit Recht „Nachrichten senden“ wählen und den Bot auf deinen Server einladen. Der Token bleibt auf diesem PC."],
     ["discord.channelId", "Kanal-ID (für die Knöpfe)", "text", "In Discord: Einstellungen → Erweitert → Entwicklermodus an; dann Kanal rechtsklicken → „Kanal-ID kopieren“."],
   ]],
@@ -115,6 +118,9 @@ async function build() {
       try { await call("postDiscordPanel"); const st = await call("discordStatus"); alert(`Panel mit Knöpfen im Kanal gepostet. Bot: ${st.state}${st.error ? " (" + st.error + ")" : ""}. Klick auf „📊 Live-Statistik“ in Discord – auch vom Handy.`); }
       catch (e) { errorBox.textContent = e.message + " (Token und Kanal-ID zuerst speichern.)"; errorBox.hidden = false; }
     } }, "Discord-Knöpfe posten"),
+    h("button", { class: "btn", type: "button", onclick: async () => {
+      try { await call("testDiscordLog"); alert("Testnachricht an den Log-Webhook gesendet."); } catch (e) { errorBox.textContent = e.message + " (Log-Webhook zuerst eintragen und speichern.)"; errorBox.hidden = false; }
+    } }, "Log-Webhook testen"),
     h("button", { class: "btn", type: "button", onclick: async () => {
       try { await call("testDiscord"); alert("Testnachricht an Discord gesendet."); } catch (e) { errorBox.textContent = e.message + " (Webhook zuerst eintragen und speichern.)"; errorBox.hidden = false; }
     } }, "Discord testen"),
