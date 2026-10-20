@@ -1,6 +1,6 @@
 // Desktop-App: lädt die unveränderte Chrome-Erweiterung (../extension) in Electron-Fenstern.
 // Hintergrund-Fenster (unsichtbar) = Service Worker (alle 30 s ein Durchlauf); Hauptfenster = Popup; weitere: Dashboard, Einstellungen.
-const { app, BrowserWindow, ipcMain, protocol, Tray, Menu, Notification, nativeImage, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, protocol, session, Tray, Menu, Notification, nativeImage, shell } = require("electron");
 const fs = require("fs");
 const path = require("path");
 const { Store } = require("./storage");
@@ -36,6 +36,20 @@ const pending = new Map();
 let nextId = 1;
 
 const injectShim = (html) => html.replace(/<head[^>]*>/i, (m) => `${m}<script src="__shim.js"></script>`);   // Shim vor allen anderen Skripten einsetzen
+
+// Discord lehnt Anfragen ab, die wie aus einem Browser aussehen (Fehler 40333 „internal network error“): Bots müssen sich mit einem
+// DiscordBot-User-Agent melden und dürfen keinen Origin/Referer senden. Für Discord-Adressen setzen wir deshalb die Kopfzeilen eines normalen Bot-Clients.
+const DISCORD_UA = "DiscordBot (https://github.com/pizzaauto0/tradingg, 1.0)";
+function installDiscordHeaders() {
+  const urls = ["https://discord.com/api/*", "https://discordapp.com/api/*", "wss://gateway.discord.gg/*"];
+  if (process.env.TB_TEST_HEADER_URL) urls.push(process.env.TB_TEST_HEADER_URL);   // nur für Tests
+  session.defaultSession.webRequest.onBeforeSendHeaders({ urls }, (details, callback) => {
+    const h = { ...details.requestHeaders };
+    for (const k of Object.keys(h)) if (/^(origin|referer|sec-fetch-.*|sec-ch-ua.*)$/i.test(k)) delete h[k];
+    h["User-Agent"] = DISCORD_UA;
+    callback({ requestHeaders: h });
+  });
+}
 
 function serve(request) {
   const u = new URL(request.url);
@@ -142,6 +156,7 @@ else {
   app.whenReady().then(() => {
     store = new Store(path.join(app.getPath("userData"), "storage.json"));
     protocol.handle("app", serve);
+    installDiscordHeaders();
     Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: "editMenu" }, { role: "viewMenu" }]));
     setupIpc();
     startBackground();
