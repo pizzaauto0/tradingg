@@ -18,6 +18,19 @@ const BACKGROUND_HTML = '<!doctype html><meta charset="utf-8"><script src="__shi
 protocol.registerSchemesAsPrivileged([{ scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 
 let store, bg, tray, quitting = false, bgReady;
+const errors = [];   // letzte Fehler aller Fenster (für die Diagnose in der App und app.log)
+const SLOW = new Set(["research", "tickNow", "kill", "killAll", "testTrade", "buy", "sell", "balances", "start", "startAll", "stopAll", "postDiscordPanel", "testDiscord", "testDiscordLog"]);
+function note(kind, text) {
+  const line = `${new Date().toISOString()} ${kind}: ${text}`;
+  errors.push(line); if (errors.length > 60) errors.shift();
+  try { fs.appendFileSync(path.join(app.getPath("userData"), "app.log"), line + "\n"); } catch { /* Protokoll ist nur Zugabe */ }
+}
+const watch = (win, name) => {
+  win.webContents.on("before-input-event", (e, i) => { if (i.type === "keyDown" && (i.key === "F12" || (i.control && i.shift && i.key.toLowerCase() === "i"))) { win.webContents.toggleDevTools(); e.preventDefault(); } });   // Entwicklerwerkzeuge (Fehlersuche)
+  win.webContents.on("console-message", (_e, level, message, line, source) => { if (level >= 2 && !/Electron Security Warning/.test(message)) note(`Fehler in ${name}`, `${message} (${String(source).split("/").slice(-2).join("/")}:${line})`); });
+  win.webContents.on("did-fail-load", (_e, code, desc, url) => note(`Laden fehlgeschlagen in ${name}`, `${desc} (${code}) ${url}`));
+  win.webContents.on("render-process-gone", (_e, d) => note(`Prozess beendet in ${name}`, d.reason));
+};
 const windows = {};
 const pending = new Map();
 let nextId = 1;
@@ -61,6 +74,7 @@ function openPage(name, { show = true, query = "" } = {}) {
   if (win && !win.isDestroyed()) { if (show) { win.show(); win.focus(); } return win; }
   win = new BrowserWindow({ width: spec.width, height: spec.height, title: spec.title, show, icon: path.join(__dirname, "icon.png"), backgroundColor: "#0d1117", webPreferences: webPrefs() });
   lockdown(win);
+  watch(win, name);
   win.removeMenu?.();
   win.on("close", (e) => { if (name === "main" && !quitting) { e.preventDefault(); win.hide(); } });   // Hauptfenster schließen = im Hintergrund weiterlaufen
   win.loadURL(spec.url + query);
@@ -70,9 +84,11 @@ function openPage(name, { show = true, query = "" } = {}) {
 
 function startBackground() {
   bg = new BrowserWindow({ show: false, webPreferences: { ...webPrefs(), backgroundThrottling: false } });
-  bg.webContents.on("did-fail-load", (_e, code, desc, url) => console.error("Hintergrunddienst konnte nicht laden:", code, desc, url));
+  watch(bg, "Hintergrunddienst");
+  let retries = 0;
+  bg.webContents.on("did-fail-load", (_e, code, desc, url) => { console.error("Hintergrunddienst konnte nicht laden:", code, desc, url); if (retries++ < 3) setTimeout(() => bg.loadURL("app://ext/__background.html").catch(() => {}), 2000); });
   bgReady = new Promise((res) => bg.webContents.once("did-finish-load", res));
-  bg.loadURL("app://ext/__background.html").catch((e) => console.error("Hintergrunddienst loadURL:", e.message));
+  bg.loadURL(process.env.TB_BREAK ? "app://ext/nope.html" : "app://ext/__background.html").catch((e) => console.error("Hintergrunddienst loadURL:", e.message));
 }
 
 function setupIpc() {
@@ -87,11 +103,16 @@ function setupIpc() {
     await bgReady;
     return new Promise((resolve) => {
       const id = nextId++;
-      const timer = setTimeout(() => { pending.delete(id); resolve({ ok: false, error: "Zeitüberschreitung im Hintergrunddienst" }); }, 180000);
+      const timer = setTimeout(() => { pending.delete(id); resolve({ ok: false, error: "Der Hintergrunddienst antwortet nicht (Zeitüberschreitung). Menü Ansicht → Entwicklerwerkzeuge zeigt den Fehler; Protokoll: app.log im Datenordner." }); }, SLOW.has(msg?.type) ? 300000 : 20000);
       pending.set(id, (r) => { clearTimeout(timer); resolve(r); });
       bg.webContents.send("rt:message", id, msg);
     });
   });
+  ipcMain.handle("diag", () => ({
+    version: app.getVersion(), packaged: app.isPackaged, ext: EXT, extExists: fs.existsSync(EXT), userData: app.getPath("userData"), platform: process.platform + " " + process.arch,
+    electron: process.versions.electron, bgUrl: bg && !bg.isDestroyed() ? bg.webContents.getURL() : null, bgLoading: bg && !bg.isDestroyed() ? bg.webContents.isLoading() : null,
+    storageKeys: Object.keys(store.get("local", null) || {}), errors: errors.slice(-15),
+  }));
   ipcMain.on("rt:reply", (_e, id, resp) => { const fn = pending.get(id); if (fn) { pending.delete(id); fn(resp); } });
   ipcMain.on("notify", (_e, o) => { if (Notification.isSupported()) new Notification({ title: String(o.title || "Trading-Bot"), body: String(o.message || "") }).show(); });
   ipcMain.on("badge", (_e, { text }) => { tray?.setToolTip(`Trading-Bot${text ? " – " + text : ""}`); windows.main?.setTitle(`Trading-Bot${text ? " [" + text + "]" : ""}`); });

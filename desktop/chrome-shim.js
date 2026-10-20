@@ -14,6 +14,16 @@
     remove: (keys) => B.storage("remove", name, keys),
     clear: () => B.storage("clear", name),
   });
+  // Fehler sichtbar machen statt leerer Seite: erster Fehler als roter Kasten oben (hilft bei der Fehlersuche)
+  const showError = (text) => {
+    try {
+      let box = document.getElementById("__err");
+      if (!box) { box = document.createElement("pre"); box.id = "__err"; box.style.cssText = "position:fixed;z-index:99999;top:0;left:0;right:0;margin:0;padding:8px 12px;background:#7a1f1f;color:#fff;font:12px/1.4 monospace;white-space:pre-wrap;max-height:40vh;overflow:auto"; (document.body || document.documentElement).append(box); }
+      if (box.textContent.length < 1500) box.textContent += (box.textContent ? "\n" : "") + text;
+    } catch { /* nichts mehr zu tun */ }
+  };
+  addEventListener("error", (e) => showError(`Fehler: ${e.message} (${String(e.filename).split("/").pop()}:${e.lineno})`));
+  addEventListener("unhandledrejection", (e) => showError(`Fehler: ${e.reason?.message || e.reason}`));
   const listeners = [];
   let messageHooked = false;
   const alarms = new Map(), alarmListeners = [];
