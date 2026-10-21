@@ -1,7 +1,7 @@
 // Stellt die wenigen chrome.*-Funktionen bereit, die die Erweiterung nutzt (storage, runtime, alarms, notifications, action, tabs, permissions).
 // Wird vor allen Skripten jeder Seite geladen. Die Erweiterung selbst bleibt unverändert.
 (() => {
-  const B = window.electronBridge || window.parent.electronBridge;   // in eingebetteten Tabs (iframe) liegt die Brücke im Elternfenster (gleicher Ursprung)
+  const B = (() => { let w = window; for (let i = 0; i < 4 && w; i++) { if (w.electronBridge) return w.electronBridge; if (w.parent === w) break; w = w.parent; } })();   // in eingebetteten Tabs (iframe) liegt die Brücke im Elternfenster (gleicher Ursprung)
   const RUNTIME_ID = "trading-bot-desktop";
   const pageOf = (url) => { const m = /\/([a-z]+)\.html(\?[^#]*)?/.exec(String(url)); return m ? [m[1], m[2] || ""] : [null, ""]; };
   // Die Seiten der Erweiterung sind für ein schmales Popup gebaut; im Fenster dürfen sie breiter werden
