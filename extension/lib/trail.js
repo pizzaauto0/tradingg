@@ -16,7 +16,8 @@ export function planTrail(pos, price, atrValue, market, t, costFrac = 0) {
   if (!(profit > 0)) return null;
   const initStop = pos.initialStop ?? pos.stop;
   const risk = (pos.entryPrice - initStop) * pos.amount > 0 ? (pos.entryPrice - initStop) * pos.amount : 2 * atrValue * pos.amount;
-  const armed = profit >= t.startUsd || profit >= t.startR * risk;
+  // Standard: ab startPct % Gewinn (auf den eingesetzten Betrag) wird nachgezogen; startPct = 0 → alte Regel (USD ODER Vielfaches des Risikos)
+  const armed = t.startPct > 0 ? unit / pos.entryPrice * 100 >= t.startPct : profit >= t.startUsd || profit >= t.startR * risk;
   if (!armed) return null;
 
   const strong = market?.regime === "uptrend" && (market.adx ?? 0) >= 25;

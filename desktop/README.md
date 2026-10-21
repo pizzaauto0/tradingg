@@ -102,7 +102,7 @@ Im Dashboard (📈 im jeweiligen Tab) steht neben dem Chart die Karte **Handeln*
 ### KI-Trailing
 Der Bot zieht den Stop-Loss selbst nach, sobald eine Position im Plus ist – **regelbasiert und mit Begründung, kein Sprachmodell**. Beispiel: ab **+40 USD** Gewinn (oder ab 1× dem ursprünglichen Risiko, es genügt eine Bedingung) liegt der Stop bei **+30** (75 % gesichert).
 Je nach Lage: starker Aufwärtstrend (ADX ≥ 25) → weniger sichern (der Trend darf laufen) und bei Kurs nahe am Ziel das Ziel um 1R anheben (höchstens 3×); Seitwärts/Abwärts → mehr sichern.
-Sicherungen: Stop nur nach oben, nie unter Einstand + Kosten (er liegt wirklich im Plus), nie näher als 0,5 ATR am Kurs. Jede Anpassung kommt als Meldung (Discord: 🔒) und steht im Trade-Log. Einstellbar unter ⚙ „KI-Trailing“, je Position im Dashboard abschaltbar.
+Sicherungen: Stop nur nach oben, nie unter Einstand + Kosten (er liegt wirklich im Plus), nie näher als 0,5 ATR am Kurs. Jede Anpassung kommt als Meldung (Discord: 🔒) und steht im Trade-Log. Standard: Das Nachziehen startet ab **5 % Gewinn** (Einstellung „Start ab Gewinn (%)“; 0 = alte USD-/Risiko-Regel). Einstellbar unter ⚙ „KI-Trailing“, je Position im Dashboard abschaltbar.
 Hinweis: Das Spielgeld rechnet in USD (kein Euro). Bei kleinem Konto greift meist die 1R-Bedingung früher als die 40 USD.
 
 ## Discord-Knöpfe: Live-Statistik vom Handy

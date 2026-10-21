@@ -5,7 +5,7 @@ import { installFakeChrome, makeCandles, marketFetch, TF_MS } from "./helpers.mj
 import { handle, runTick, getStatus, whenIdle } from "../lib/controller.js";
 import { planTrail } from "../lib/trail.js";
 
-const T = { enabled: true, startUsd: 40, startR: 1.0, lockFraction: 0.75, extendTp: true };
+const T = { enabled: true, startPct: 0, startUsd: 40, startR: 1.0, lockFraction: 0.75, extendTp: true };
 const pos = (o = {}) => ({ entryPrice: 100, amount: 10, stop: 98, initialStop: 98, takeProfit: 105, ...o });   // 1R = 20 USD
 
 test("Trailing: +40 Gewinn → Stop sichert +30 (75 %), nie unter dem alten Stop, nie ohne Gewinn", () => {
@@ -66,7 +66,7 @@ test("Trailing im Betrieb: Stop wandert nach oben, alte Tiefs lösen ihn nicht a
   await handle({ type: "adjust", symbol: "SOL/USD", takeProfit: entry * 1.3 }, f);   // Ziel weit weg, damit nur das Nachziehen getestet wird
   // Kurs steigt deutlich (neue Kerze, Tief bleibt über dem Stop)
   const up = shifted(trend(1502, true), 2), n = up.t.length - 1;
-  up.open[n] = up.close[n - 1]; up.close[n] = entry + 8; up.high[n] = entry + 8.5; up.low[n] = entry + 6;
+  up.open[n] = up.close[n - 1]; up.close[n] = entry * 1.06; up.high[n] = entry * 1.065; up.low[n] = entry * 1.04;
   world.dfs["SOL/USD"] = up;
   await runTick({ fetchFn: f, now: at(up.t.at(-1)) });
   p = (await getStatus()).state.positions["SOL/USD"];
@@ -77,7 +77,7 @@ test("Trailing im Betrieb: Stop wandert nach oben, alte Tiefs lösen ihn nicht a
   const trailedStop = p.stop;
   // weitere Kerze ohne neues Tief unter dem Stop: Position bleibt (die Tiefs vor der Stop-Änderung zählen nicht)
   const up2 = shifted(up); const m = up2.t.length - 1;
-  up2.open[m] = up.close.at(-1); up2.close[m] = entry + 8.2; up2.high[m] = entry + 8.6; up2.low[m] = entry + 7;
+  up2.open[m] = up.close.at(-1); up2.close[m] = entry * 1.062; up2.high[m] = entry * 1.066; up2.low[m] = entry * 1.058;
   world.dfs["SOL/USD"] = up2;
   await runTick({ fetchFn: f, now: at(up2.t.at(-1)) });
   assert.ok((await getStatus()).state.positions["SOL/USD"], "noch offen");
@@ -138,4 +138,11 @@ test("Dashboard: Kauf nur im Paper-Modus (Live abgelehnt); Währungs-Bot kauft m
   assert.ok(Math.abs(acc.equity - 1000) < 5, "nur Kosten, kein Verlust durch gebundenes Geld");
   const c = await handle({ type: "chart", bot: "fx", symbol: "EUR/USD" }, f);
   assert.equal(c.manualBuy, true); assert.equal(c.trail.startUsd, 40); assert.ok(c.position.manual);
+});
+
+test("Standard: Nachziehen ab 5 % Gewinn", () => {
+  const T5 = { ...T, startPct: 5 }, pos = { entryPrice: 100, amount: 1, stop: 95, initialStop: 95, takeProfit: 110 };
+  assert.equal(planTrail(pos, 104, 1, null, T5), null);
+  const r = planTrail(pos, 105.5, 1, null, T5);
+  assert.ok(r && r.stop > 100);
 });

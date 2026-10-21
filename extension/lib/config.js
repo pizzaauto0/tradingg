@@ -67,7 +67,7 @@ export const DEFAULTS = {
   // enabled: null = automatisch (an in der Desktop-App, aus in der Erweiterung); je Modus abschaltbar.
   compare: { enabled: null, strict: true, explore: true, playbook: true, winrate: true, final: true },
   safety: { maxDrawdownPct: 15, maxLossStreak: 4, pauseHours: 6 },
-  trail: { enabled: true, startUsd: 40, startR: 1.0, lockFraction: 0.75, extendTp: true },
+  trail: { enabled: true, startPct: 5, startUsd: 40, startR: 1.0, lockFraction: 0.75, extendTp: true },
   costs: { feePct: 0.26, slippagePct: 0.20 }, // je Order (Kauf UND Verkauf); bewusst hoch angesetzt – lieber zu viele Kosten als zu wenige
   backtest: {
     minCandles: 1000, minTrades: 20, minReturnPct: 2.0, maxDrawdownPct: 15.0, minSharpe: 1.0,
@@ -151,6 +151,7 @@ export function validateConfig(c) {
   if (!(Number.isInteger(c.safety.maxLossStreak) && c.safety.maxLossStreak >= 0 && c.safety.maxLossStreak <= 20)) fail("Verlustserie: ganze Zahl 0 (aus) bis 20.");
   if (!(c.safety.pauseHours >= 0.5 && c.safety.pauseHours <= 72)) fail("Pause nach Verlustserie: 0,5 bis 72 Stunden.");
   if (!(Number.isInteger(c.discord.dailyHour) && c.discord.dailyHour >= 0 && c.discord.dailyHour <= 23)) fail("Tagesbericht-Stunde: ganze Zahl 0 bis 23.");
+  if (!(c.trail.startPct >= 0 && c.trail.startPct <= 100)) fail("Trailing: Start in % muss zwischen 0 und 100 liegen (0 = aus, dann gilt USD/R).");
   if (!(c.trail.startUsd > 0 && c.trail.startR > 0)) fail("Trailing: Startgewinn (USD) und Start (R) müssen größer 0 sein.");
   if (!(c.trail.lockFraction >= 0.3 && c.trail.lockFraction <= 0.95)) fail("Trailing: gesicherter Gewinnanteil muss zwischen 0,3 und 0,95 liegen.");
   if (c.discord.channelId && !/^\d{5,25}$/.test(c.discord.channelId)) fail("Discord-Kanal-ID ungültig (nur Ziffern; Kanal rechtsklicken → „Kanal-ID kopieren“, Entwicklermodus nötig).");

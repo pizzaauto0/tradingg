@@ -37,6 +37,7 @@ const SECTIONS = [
   ]],
   ["KI-Trailing: Stop-Loss und Take-Profit nachziehen", [
     ["trail.enabled", "Aktiv", "bool", "Zieht den Stop-Loss nach oben, sobald eine Position im Plus ist – nie nach unten. Regelbasiert (kein Sprachmodell), jede Anpassung wird mit Grund gemeldet. Pro Position im Dashboard abschaltbar."],
+    ["trail.startPct", "Start ab Gewinn (%)", "number", "Ab diesem Gewinn (in % vom Einsatz) zieht der Bot Stop-Loss nach – Standard 5. 0 = stattdessen die USD-/R-Regel unten."],
     ["trail.startUsd", "Start ab Gewinn (USD)", "number", "Ab diesem Gewinn (vor Gebühren) wird gesichert – Beispiel 40: bei +40 liegt der Stop bei +30."],
     ["trail.startR", "… oder ab Vielfachem des Risikos (R)", "number", "1 = sobald der Gewinn so groß ist wie das ursprüngliche Risiko. Es genügt eine der beiden Bedingungen (bei kleinem Konto greift meist diese)."],
     ["trail.lockFraction", "Gesicherter Anteil des Gewinns (0,3–0,95)", "number", "0,75 = bei +40 Stop bei +30. Bei starkem Aufwärtstrend automatisch 0,15 weniger, bei Seitwärts/Abwärts 0,10 mehr."],
