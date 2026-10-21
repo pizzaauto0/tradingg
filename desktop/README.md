@@ -49,6 +49,12 @@ Die **anderen vier laufen als Schatten-Läufe im Hintergrund** mit **eigenem Pap
 - **Discord-Tagesbericht:** jeden Abend (ab Uhrzeit einstellbar) Profit heute/7 Tage/gesamt, Käufe/Verkäufe, bester/schlechtester Trade, offene Positionen, Drawdown.
 - **Symbol im Infobereich:** Tooltip zeigt Gewinn heute und gesamt.
 
+## Kosten-Filter (Lehre aus den ersten Logs)
+Bei ruhigen Märkten (Gold-Token PAXG, Währungen) lag das Ziel näher am Einstand als die Kosten für Kauf + Verkauf – selbst ein erreichtes Ziel brachte Verlust. Seitdem gilt:
+- **Kein Einstieg**, wenn das Ziel nicht mindestens das **2-fache der Round-Trip-Kosten** (Gebühr + Rutschen, Kauf und Verkauf) einbringt (⚙ Risiko → „Kosten-Filter“, 0 = aus). Im Stundenbericht/Log steht dann „Signal vorhanden, aber kein Kauf: Ziel nur 0,05 % entfernt, Kosten 0,92 % …“.
+- **Stop und Ziel gelten ab dem erwarteten Kaufpreis** (Kurs + Rutschen), nicht ab dem Kurs ohne Rutschen.
+- Empfehlung für Krypto: **Zeitrahmen 1h oder 4h** statt 15m (⚙ → Zeitrahmen, danach „Strategien neu prüfen“) – längere Kerzen bewegen sich weiter als die Kosten.
+
 ## Gebühren (bewusst zu hoch)
 Backtest und Paper-Handel rechnen bei **jedem Kauf und jedem Verkauf** Gebühr/Spread plus Rutschen ab. Untergrenzen je Order:
 Krypto 0,26 % + 0,20 %, Währungen 0,03 % + 0,03 %, Metalle 0,06 % + 0,06 % – deutlich mehr als echte Broker verlangen. Niedriger eingestellte Werte

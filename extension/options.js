@@ -17,6 +17,7 @@ const SECTIONS = [
     ["risk.maxDailyLossPct", "Max. Tagesverlust (%)", "number", "Danach Handelsstopp bis zum nächsten UTC-Tag."],
     ["risk.closePositionsOnDailyLimit", "Bei Tageslimit Position schließen", "bool"],
     ["risk.maxOpenPositions", "Max. offene Positionen", "number"],
+    ["risk.minRewardToCost", "Kosten-Filter: Ziel mindestens X-fache Kosten (0 = aus)", "number", "Kein Einstieg, wenn das Ziel (Abstand zum Einstand) nicht mindestens so viel mal die Kosten für Kauf + Verkauf beträgt. Verhindert Trades in sehr ruhigen Märkten (z. B. Gold-Token, Währungen), die schon beim Einstieg verloren sind. 2 = Ziel mindestens doppelt so groß wie die Kosten."],
     ["risk.maxPositionPct", "Max. Positionsgröße (% des Kapitals)", "number"],
     ["risk.atrStopMult", "Stop-Loss (x ATR)", "number"],
     ["risk.takeProfitRr", "Take-Profit (Vielfaches des Risikos)", "number"],

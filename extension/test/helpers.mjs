@@ -5,6 +5,10 @@ export function installFakeChrome() {
     async set(obj) { for (const [k, v] of Object.entries(obj)) m.set(k, structuredClone(v)); },
     async remove(key) { m.delete(key); }, _m: m }; };
   globalThis.chrome = { storage: { local: mk(), session: mk() }, notifications: { create() {} } };
+  // Die Testdaten haben winzige Kursbewegungen (Ziel nur ~1 % entfernt, Kosten 0,9 %): der Kosten-Filter (minRewardToCost) wäre dort immer aktiv.
+  // Tests, die ihn prüfen, setzen ihn selbst wieder auf 2.
+  const off = { risk: { minRewardToCost: 0 } };
+  for (const k of ["config", "config_fx", "config_metals"]) globalThis.chrome.storage.local._m.set(k, structuredClone(off));
   return globalThis.chrome;
 }
 

@@ -208,6 +208,7 @@ async function modeData(botId, mode, now, hours = 1) {
     const acc = (await getLocal(k.account, null)) || { cash: sc.capital.start, values: {} };
     cash = acc.cash; equity = acc.cash + Object.values(state.positions).reduce((x, p) => x + p.amount * (state.activity?.[p.symbol]?.price ?? p.entryPrice), 0);
   }
+  const evts = main ? (await getLocal("eventLog", [])).filter((e) => (e.bot || DEFAULT_BOT) === botId) : (state.events || []);
   const prices = Object.fromEntries(Object.entries(state.activity || {}).filter(([, a]) => a.price != null).map(([s, a]) => [s, a.price]));
   const sum = summarizeMode({ capital, trades, positions: state.positions, prices, eqLog: main ? [] : eqLog });
   return { bot: botId, botLabel: BOTS[botId].label, mode, main, now: nowMs, hours, capital, equity, cash, sum, positions: state.positions, prices, state, eqLog,
@@ -215,7 +216,8 @@ async function modeData(botId, mode, now, hours = 1) {
     decisions: (state.decisions || []).filter((x) => Date.parse(x.ts) >= from), approved: state.approved.length,
     active: state.approved.filter((a) => a.active !== false).map((a) => `${a.symbol.split("/")[0]} ${a.title || a.name}`),
     eqDelta: equityAt(eqLog, from) != null ? equity - equityAt(eqLog, from) : null,
-    errors: [...(state.lastError ? [state.lastError] : []), ...(state.events || []).filter((e) => /FEHLER|WARNUNG/.test(e.text)).slice(-5).map((e) => e.text)] };
+    // nur Meldungen aus dem Zeitraum (sonst steht eine alte Warnung in jeder späteren Stundendatei)
+    errors: [...(state.lastError ? [state.lastError] : []), ...evts.filter((e) => Date.parse(e.ts) >= from && /FEHLER|WARNUNG/.test(e.text)).slice(-5).map((e) => e.text)] };
 }
 
 // Pro Modus jede Stunde eine Log-Datei und alle 6 Stunden eine zusammenfassende (nur in der Desktop-App: dort gibt es einen Ordner dafür)

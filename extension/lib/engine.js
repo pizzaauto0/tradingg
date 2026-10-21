@@ -112,6 +112,8 @@ export class Engine {
       return any ? `keine aktive Strategie passt zur Marktphase „${a.regime}“` : "keine zugelassene Strategie (Backtest nicht bestanden) – der Bot wartet";
     }
     if (!a.signal) return `kein Einstiegssignal der Strategie ${a.strategy.split("(")[0]}`;
+    const blocked = state.entryBlocked?.[sym];
+    if (blocked && Date.now() - Date.parse(blocked.ts) < 3 * 3.6e6) return `Signal vorhanden, aber kein Kauf: ${blocked.text}`;
     const [ok, why] = this.risk.canOpen(Object.keys(state.positions).length);
     if (this.risk.halted) return "Signal vorhanden, aber Tageslimit erreicht – kein Handel";
     if (this.isPaused(new Date())) return `Signal vorhanden, aber Kaufpause nach Verlustserie bis ${new Date(state.pauseUntil).toLocaleTimeString("de-DE")}`;
@@ -389,14 +391,24 @@ export class Engine {
 
     const price = last(live.close), atrValue = last(atr(closed, this.cfg.risk.atrPeriod));
     const risk = { ...this.cfg.risk, atrStopMult: strategy.stopMult(this.cfg.risk.atrStopMult), takeProfitRr: strategy.rr(this.cfg.risk.takeProfitRr) };
-    const [stop, takeProfit] = stopAndTarget(price, atrValue, risk);
-    if (stop <= 0) { console.warn(`${sym}: ATR unbrauchbar, kein Einstieg`); return; }
+    const [stop0, tp0] = stopAndTarget(price, atrValue, risk);
+    if (stop0 <= 0) { console.warn(`${sym}: ATR unbrauchbar, kein Einstieg`); return; }
+    // Stop und Ziel gelten ab dem ERWARTETEN Kaufpreis (Kurs + Rutschen), nicht ab dem Kurs ohne Rutschen – sonst kann ein Ziel unter dem echten Einstand liegen
+    const entryPx = price * (1 + this.cfg.costs.slippagePct / 100), shift = entryPx - price, stop = stop0 + shift, takeProfit = tp0 + shift;
+    // Kosten-Filter: Das Ziel muss deutlich mehr bringen, als Kauf + Verkauf kosten (Gebühr + Rutschen, beide Seiten) – sonst ist der Trade schon beim Einstieg verloren
+    const roundTrip = price * 2 * (this.cfg.costs.feePct + this.cfg.costs.slippagePct) / 100, minMult = this.cfg.risk.minRewardToCost ?? 0;
+    if (minMult > 0 && takeProfit - entryPx < minMult * roundTrip) {
+      const text = `Ziel nur ${(((takeProfit - entryPx) / entryPx) * 100).toFixed(2)} % entfernt, Kosten für Kauf+Verkauf ${((roundTrip / price) * 100).toFixed(2)} % – verlangt wird mindestens das ${minMult}-fache`;
+      (this.state.entryBlocked ||= {})[sym] = { ts: now.toISOString(), text };
+      this.log("info", `${sym}: Signal, aber kein Kauf: ${text}`);
+      return;
+    }
     const equity = await this.equity();
-    const raw = positionSize(this.risk.sizingEquity(equity), await this.broker.cash(), price, stop, this.cfg.risk, this.cfg.costs);
+    const raw = positionSize(this.risk.sizingEquity(equity), await this.broker.cash(), entryPx, stop, this.cfg.risk, this.cfg.costs);
     const amount = floorTo(raw, price > 1000 ? 6 : 5);
     if (amount * price < MIN_NOTIONAL_USD) { console.info(`${sym}: Positionsgröße unter Minimum (${(amount * price).toFixed(2)} USD)`); this.log("info", `${sym}: Positionsgröße unter Minimum (${(amount * price).toFixed(2)} USD) – kein Kauf`); return; }
 
-    const riskCash = amount * (price - stop);
+    const riskCash = amount * (entryPx - stop);
     const reason = `${sel.record.explore ? "EXPERIMENTELL (Strategie hat die strengen Prüfungen NICHT bestanden/wurde nicht geprüft): " : ""}${sel.record.title ? `${sel.record.title} – ` : ""}${strategy.explain(closed)}; Marktphase: ${summarize(market)}; Stop ${fmtPx(stop)} ` +
       `(${risk.atrStopMult}x ATR), Ziel ${fmtPx(takeProfit)}; Risiko ca. ${riskCash.toFixed(2)} ` +
       `(${((riskCash / equity) * 100).toFixed(2)}% des Kapitals); Backtest: Sharpe ${(sel.record.metrics?.sharpe ?? 0).toFixed(2)}, Trefferquote ${(sel.record.metrics?.win_rate_pct ?? 0).toFixed(1)}%`;

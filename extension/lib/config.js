@@ -57,7 +57,7 @@ export const DEFAULTS = {
   capital: { start: 300 }, // Paper: Startguthaben. Live: maximal eingesetztes USDC
   risk: {
     riskPerTradePct: 1.0, maxDailyLossPct: 5.0, closePositionsOnDailyLimit: true,
-    maxOpenPositions: 2, maxPositionPct: 50.0, atrPeriod: 14, atrStopMult: 2.0, takeProfitRr: 2.0,
+    maxOpenPositions: 2, maxPositionPct: 50.0, minRewardToCost: 2.0, atrPeriod: 14, atrStopMult: 2.0, takeProfitRr: 2.0,
   },
   // KI-Trailing (lib/trail.js): zieht Stop-Loss (und bei starkem Trend das Ziel) nach, sobald die Position im Plus ist. startUsd: Gewinn in USD, ab dem gesichert wird;
   // startR: oder Vielfaches des ursprünglichen Risikos; lockFraction: Anteil des aktuellen Gewinns, den der Stop sichert (0,75: bei +40 Stop bei +30).
@@ -142,6 +142,7 @@ export function validateConfig(c) {
   if (!(r.riskPerTradePct > 0 && r.riskPerTradePct <= 2)) fail("Risiko pro Trade muss in (0, 2] % liegen.");
   if (!(r.maxDailyLossPct > 0 && r.maxDailyLossPct <= 100)) fail("Max. Tagesverlust muss in (0, 100] % liegen.");
   if (!(r.maxOpenPositions >= 1)) fail("Max. offene Positionen muss >= 1 sein.");
+  if (!(r.minRewardToCost >= 0 && r.minRewardToCost <= 20)) fail("Mindest-Gewinnchance im Verhältnis zu den Kosten muss zwischen 0 (aus) und 20 liegen.");
   if (!(r.maxPositionPct > 0 && r.maxPositionPct <= 100)) fail("Max. Positionsgröße muss in (0, 100] % liegen.");
   if (!(r.atrPeriod >= 2 && r.atrStopMult > 0 && r.takeProfitRr > 0)) fail("ATR-/Stop-Parameter ungültig.");
   if (c.costs.feePct < 0 || c.costs.slippagePct < 0) fail("Kosten dürfen nicht negativ sein.");
