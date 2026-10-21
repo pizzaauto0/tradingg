@@ -57,7 +57,7 @@ export const DEFAULTS = {
   capital: { start: 300 }, // Paper: Startguthaben. Live: maximal eingesetztes USDC
   risk: {
     riskPerTradePct: 1.0, maxDailyLossPct: 5.0, closePositionsOnDailyLimit: true,
-    maxOpenPositions: 2, maxPositionPct: 50.0, minRewardToCost: 2.0, atrPeriod: 14, atrStopMult: 2.0, takeProfitRr: 2.0,
+    maxOpenPositions: 2, maxPositionPct: 50.0, minRewardToCost: 2.0, minHoldBars: 3, atrPeriod: 14, atrStopMult: 2.0, takeProfitRr: 2.0,
   },
   // KI-Trailing (lib/trail.js): zieht Stop-Loss (und bei starkem Trend das Ziel) nach, sobald die Position im Plus ist. startUsd: Gewinn in USD, ab dem gesichert wird;
   // startR: oder Vielfaches des ursprünglichen Risikos; lockFraction: Anteil des aktuellen Gewinns, den der Stop sichert (0,75: bei +40 Stop bei +30).
@@ -66,7 +66,7 @@ export const DEFAULTS = {
   // Vergleichs-Modi (Desktop-App): neben dem Haupt-Modus laufen die übrigen Modi als Schatten-Läufe mit eigenem Paper-Geld (siehe compare.js).
   // enabled: null = automatisch (an in der Desktop-App, aus in der Erweiterung); je Modus abschaltbar.
   compare: { enabled: null, strict: true, explore: true, playbook: true, winrate: true, final: true },
-  safety: { maxDrawdownPct: 15, maxLossStreak: 4, pauseHours: 6 },
+  safety: { maxDrawdownPct: 15, maxLossStreak: 4, pauseHours: 6, stratMaxLosses: 2, stratPauseHours: 24 },
   trail: { enabled: true, startPct: 5, startUsd: 40, startR: 1.0, lockFraction: 0.75, extendTp: true },
   costs: { feePct: 0.26, slippagePct: 0.20 }, // je Order (Kauf UND Verkauf); bewusst hoch angesetzt – lieber zu viele Kosten als zu wenige
   backtest: {
@@ -149,6 +149,9 @@ export function validateConfig(c) {
   if (c.compare.enabled !== null && typeof c.compare.enabled !== "boolean") fail("Vergleichs-Modi: an/aus muss true/false sein.");
   if (!(c.safety.maxDrawdownPct >= 0 && c.safety.maxDrawdownPct <= 90)) fail("Notbremse: Drawdown muss zwischen 0 (aus) und 90 % liegen.");
   if (!(Number.isInteger(c.safety.maxLossStreak) && c.safety.maxLossStreak >= 0 && c.safety.maxLossStreak <= 20)) fail("Verlustserie: ganze Zahl 0 (aus) bis 20.");
+  if (!(Number.isInteger(c.safety.stratMaxLosses) && c.safety.stratMaxLosses >= 0 && c.safety.stratMaxLosses <= 20)) fail("Strategie-Sperre: ganze Zahl 0 (aus) bis 20.");
+  if (!(c.safety.stratPauseHours >= 1 && c.safety.stratPauseHours <= 240)) fail("Strategie-Sperre: 1 bis 240 Stunden.");
+  if (!(c.risk.minHoldBars >= 0 && c.risk.minHoldBars <= 50)) fail("Mindest-Haltedauer: 0 (aus) bis 50 Kerzen.");
   if (!(c.safety.pauseHours >= 0.5 && c.safety.pauseHours <= 72)) fail("Pause nach Verlustserie: 0,5 bis 72 Stunden.");
   if (!(Number.isInteger(c.discord.dailyHour) && c.discord.dailyHour >= 0 && c.discord.dailyHour <= 23)) fail("Tagesbericht-Stunde: ganze Zahl 0 bis 23.");
   if (!(c.trail.startPct >= 0 && c.trail.startPct <= 100)) fail("Trailing: Start in % muss zwischen 0 und 100 liegen (0 = aus, dann gilt USD/R).");

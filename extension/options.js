@@ -20,6 +20,7 @@ const SECTIONS = [
     ["risk.minRewardToCost", "Kosten-Filter: Ziel mindestens X-fache Kosten (0 = aus)", "number", "Kein Einstieg, wenn das Ziel (Abstand zum Einstand) nicht mindestens so viel mal die Kosten für Kauf + Verkauf beträgt. Verhindert Trades in sehr ruhigen Märkten (z. B. Gold-Token, Währungen), die schon beim Einstieg verloren sind. 2 = Ziel mindestens doppelt so groß wie die Kosten."],
     ["risk.maxPositionPct", "Max. Positionsgröße (% des Kapitals)", "number"],
     ["risk.atrStopMult", "Stop-Loss (x ATR)", "number"],
+    ["risk.minHoldBars", "Mindest-Haltedauer vor Ausstiegssignal (Kerzen, 0 = aus)", "number", "Ausstiegssignale der Strategie gelten erst nach so vielen Kerzen – Stop-Loss, Take-Profit und Trailing gelten immer. Verhindert Kauf-und-sofort-Verkauf, bei dem nur Gebühren bleiben."],
     ["risk.takeProfitRr", "Take-Profit (Vielfaches des Risikos)", "number"],
   ]],
   ["Vergleichs-Modi (Schatten-Läufe mit eigenem Paper-Geld)", [
@@ -34,6 +35,8 @@ const SECTIONS = [
     ["safety.maxDrawdownPct", "Notbremse: max. Verlust vom Höchststand (%, 0 = aus)", "number", "Fällt das Eigenkapital (alle Bots) um so viel unter seinen Höchststand, werden ALLE Positionen geschlossen und alle Bots gestoppt. Gilt für alle drei Bots gemeinsam. Neustart per „Bot starten“ setzt den Höchststand zurück."],
     ["safety.maxLossStreak", "Verluste in Folge bis zur Pause (0 = aus)", "number", "So viele verlorene Trades hintereinander pausieren die Käufe dieses Bots (bestehende Positionen laufen weiter)."],
     ["safety.pauseHours", "Pause nach Verlustserie (Stunden)", "number"],
+    ["safety.stratMaxLosses", "Strategie sperren nach Verlusten in Folge (0 = aus)", "number", "Verliert dieselbe Strategie auf demselben Markt so oft hintereinander, kauft genau diese Kombination eine Weile nicht mehr."],
+    ["safety.stratPauseHours", "Dauer der Strategie-Sperre (Stunden)", "number"],
   ]],
   ["KI-Trailing: Stop-Loss und Take-Profit nachziehen", [
     ["trail.enabled", "Aktiv", "bool", "Zieht den Stop-Loss nach oben, sobald eine Position im Plus ist – nie nach unten. Regelbasiert (kein Sprachmodell), jede Anpassung wird mit Grund gemeldet. Pro Position im Dashboard abschaltbar."],

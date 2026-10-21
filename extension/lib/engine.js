@@ -168,7 +168,9 @@ export class Engine {
     }
     if (fill) return this.recordExit(pos, fill, `Stop-Loss bei ${pos.stop.toFixed(2)} ausgelöst`, now);
     if (price >= pos.takeProfit) return this.close(pos, price, `Take-Profit ${pos.takeProfit.toFixed(2)} erreicht`, now);
-    if (isNew && pos.strategySpec && buildStrategy(pos.strategySpec).exit(closed).at(-1)) {
+    // Ausstiegssignale erst nach einer Mindest-Haltedauer: sonst wird direkt nach dem Kauf wieder verkauft und nur die Kosten bleiben übrig (Stop/Ziel/Trailing gelten immer)
+    const heldBars = (now.getTime() - Date.parse(pos.openedAt)) / tfMs;
+    if (isNew && pos.strategySpec && heldBars >= (this.cfg.risk.minHoldBars ?? 0) && buildStrategy(pos.strategySpec).exit(closed).at(-1)) {
       return this.close(pos, price, `Ausstiegssignal der Strategie ${pos.strategyName}`, now);
     }
   }
@@ -305,6 +307,7 @@ export class Engine {
     const h = (this.state.hourly ||= { entries: 0, exits: 0, pnl: 0 });
     h.exits++; h.pnl += pnl;
     await this.trackStreak(pnl, now);
+    await this.trackStrategy(pos, pnl, now);
     const held = (Date.parse(now.toISOString()) - Date.parse(pos.openedAt)) / 3.6e6, costs = pos.entryFee + fill.fee;
     await this.notify(`EXIT ${pos.symbol} · ${strategyLabel(pos.strategyName)}\n` +
       `Verkauf @ ${fmtPx(fill.price)} (Einstieg ${fmtPx(pos.entryPrice)}, ${pctOf(fill.price, pos.entryPrice)}) · Ergebnis ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} USD netto (Gebühren ${costs.toFixed(2)} USD) · gehalten ${held < 48 ? held.toFixed(1) + " h" : (held / 24).toFixed(1) + " Tage"}\n` +
@@ -321,6 +324,18 @@ export class Engine {
       await this.notify(`WARNUNG: ${sf.maxLossStreak} Verluste in Folge – dieser Bot kauft nicht mehr bis ${new Date(st.pauseUntil).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })} (Abkühlphase ${sf.pauseHours} h). Bestehende Positionen laufen weiter.`);
     }
   }
+
+  // Strategie-Sperre: Verliert dieselbe Strategie auf demselben Markt stratMaxLosses-mal hintereinander, wird genau diese Kombination stratPauseHours gesperrt (Backtests sagen oft mehr, als live hält)
+  async trackStrategy(pos, pnl, now) {
+    const sf = this.cfg.safety;
+    if (!(sf?.stratMaxLosses > 0) || pos.manual || !pos.strategySpec) return;
+    const key = `${pos.symbol}|${pos.strategyName}`, m = (this.state.stratLoss ||= {}), e = (m[key] ||= { n: 0 });
+    e.n = pnl > 0 ? 0 : e.n + 1;
+    if (e.n >= sf.stratMaxLosses) { e.until = new Date(now.getTime() + sf.stratPauseHours * 3.6e6).toISOString(); e.n = 0;
+      await this.notify(`SPERRE ${pos.symbol} · ${strategyLabel(pos.strategyName)}: ${sf.stratMaxLosses} Verluste in Folge – diese Strategie kauft auf diesem Markt ${sf.stratPauseHours} h lang nicht mehr. Die anderen laufen weiter.`); }
+    await this.save();
+  }
+  stratLocked(sym, name, now) { const u = this.state.stratLoss?.[`${sym}|${name}`]?.until; return !!u && now.getTime() < Date.parse(u); }
 
   isPaused(now) { return !!this.state.pauseUntil && now.getTime() < Date.parse(this.state.pauseUntil); }
 
@@ -405,6 +420,7 @@ export class Engine {
     const { market, sel, signal } = obs;
     if (!market || !sel || !signal) return;
     const { strategy } = sel;
+    if (this.stratLocked(sym, strategy.name, now)) { this.log("info", `${sym}: ${strategyLabel(strategy.name)} gesperrt (Verlustserie) – kein Einstieg`); return; }
 
     const price = last(live.close), atrValue = last(atr(closed, this.cfg.risk.atrPeriod));
     const risk = { ...this.cfg.risk, atrStopMult: strategy.stopMult(this.cfg.risk.atrStopMult), takeProfitRr: strategy.rr(this.cfg.risk.takeProfitRr) };
