@@ -24,8 +24,13 @@ gibt es die MetaTrader-App in `../mt5bot`). Nur Kauf (Long), **ohne Hebel**: bei
 Positionsgröße (33 % des Kapitals) das Risiko meist weit unter 1 % – Gewinne und Verluste bleiben klein. USD/EUR ist der Kehrwert von EUR/USD und
 rechnet das Spielgeld 1:1 (Näherung). Yahoo-Daten: Innertageskerzen reichen nur ~60 Tage (5/15/30 Min.) bzw. ~2 Jahre (1 Std.) zurück.
 
+## Übersichtlicher: Namen, Farben, Details
+- **Strategien haben Namen** statt technischer Texte (z. B. „Ausbruch“, „Trend-Rücksetzer“, „Bollinger-Rückkehr“) – in App, Dashboard, Discord, Telegram und Logs.
+- **Positionen** zeigen 🟢/🔴 (Gewinn/Verlust, farbig), Ergebnis in USD und %, Strategie und **wann geöffnet** („vor 2 h“). **Anklicken** klappt die Details auf (Öffnungszeit, Einstieg → jetzt, Stop-Loss, Take-Profit).
+- Aktivität und Ereignisse sind einklappbar; Discord-Knöpfe: 📊 Übersicht · 💰 Profit · 📌 Positionen · 🧾 Trades.
+
 ## Dashboard „Alle“ (📊 Dashboard)
-Der Knopf **📊 Dashboard** oben (neben 📱 Handy) öffnet ein eigenes Fenster (am Handy: neuer Tab) mit den **drei Bots zusammen – jeweils mit ihrem Haupt-Modus** (die Schatten-Läufe sind nicht dabei). Tabs: **📊 Alle**, **Währungen**, **Silber & Gold**, **Krypto**.
+Der Reiter **📊 Dashboard** im Hauptmenü (neben den drei Bots) zeigt den **drei Bots zusammen – jeweils mit ihrem Haupt-Modus** (die Schatten-Läufe sind nicht dabei). Tabs: **📊 Alle**, **Währungen**, **Silber & Gold**, **Krypto**.
 - **Alle:** Eigenkapital, Heute / 7 Tage / Insgesamt, eine Karte je Bot (Haupt-Modus, läuft/gestoppt, Kaufpause, offene Positionen, Gewinn), alle **offenen Positionen** zusammen (mit „Verkaufen“), alle **Märkte** mit Kurs, Marktphase, gewählter Strategie und Signal, die **letzten Käufe und Verkäufe** aller Bots und der gemeinsame Eigenkapital-Verlauf.
 - **Währungen / Silber & Gold / Krypto:** das ausführliche Dashboard dieses Bots mit Chart (Zoom), Handeln, Stop/Ziel und KI-Trailing.
 

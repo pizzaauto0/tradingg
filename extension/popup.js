@@ -1,6 +1,9 @@
 // Popup: Status, Strategien, Trades, Wallet. Alle Inhalte werden per textContent gesetzt (kein innerHTML).
 import { nearMisses, summarizeFailures } from "./lib/diagnose.js";
 import { BOTS, botAssets } from "./lib/config.js";
+import { ago as since, stamp, strategyLabel } from "./lib/names.js";
+const REGIME_DE = { uptrend: "Aufwärts", downtrend: "Abwärts", sideways: "Seitwärts" };
+const expanded = new Set(), openSections = new Set(["positions"]);   // aufgeklappte Positionen / Bereiche bleiben beim Aktualisieren erhalten
 const view = document.getElementById("view"), errorBox = document.getElementById("error");
 let tab = "status", status = null, balances = null, secretToShow = null, busy = false;
 
@@ -61,8 +64,7 @@ function activityCard() {
   const headline = !state.enabled ? "Bot gestoppt" : state.status ? state.status
     : failing ? `Durchlauf fehlgeschlagen: ${state.lastError}`
     : secs == null ? "Wartet auf den ersten Durchlauf (alle 30 s) …" : alive ? "Bot arbeitet" : "Kein Lebenszeichen – ist der Browser aktiv?";
-  const lines = [h("div", { class: "headline" }, dot, headline)];
-  if (state.enabled && secs != null) lines.push(row("Letzte Prüfung", `vor ${Math.max(0, Math.round(secs))} s`));
+  const lines = [];
   const syms = Object.keys(state.activity);
   if (syms.length) {
     lines.push(h("table", {}, h("thead", {}, h("tr", {}, ...["Markt", "Kurs", "Phase", "Strategie", "Signal"].map((t) => h("th", {}, t)))),
@@ -70,7 +72,7 @@ function activityCard() {
         const a = state.activity[sym];
         if (a.error) return h("tr", {}, h("td", {}, sym), h("td", { colspan: 4, class: "bad" }, `Daten nicht ladbar: ${a.error}`));
         return h("tr", {}, h("td", {}, sym.split("/")[0]), h("td", {}, fmt(a.price, a.price > 1000 ? 0 : 2)),
-          h("td", {}, a.regime ?? "–"), h("td", { class: a.strategy ? "" : "muted" }, a.strategy ? a.strategy.split("(")[0] : "keine"),
+          h("td", {}, REGIME_DE[a.regime] ?? "–"), h("td", { class: a.strategy ? "" : "muted", title: a.strategy || "" }, a.strategy ? strategyLabel(a.strategy) : "keine"),
           h("td", { class: a.signal ? "ok" : "" }, a.signal == null ? "–" : a.signal ? "JA" : "nein"));
       }))));
     const next = Math.min(...syms.map((s) => state.activity[s].nextCandleAt).filter(Boolean));
@@ -79,11 +81,36 @@ function activityCard() {
   if (state.enabled && state.report.length && !state.approved.length && !state.status) lines.push(h("div", { class: "hint" }, "Keine Strategie hat den Backtest bestanden – der Bot wartet und prüft täglich neu."));
   if (status.state.decisions?.length) lines.push(h("div", { class: "decisions" }, ...status.state.decisions.map((d) =>
     h("div", {}, h("span", { class: "muted" }, new Date(d.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) + " "), d.text))));
-  return card("Aktivität", ...lines);
+  const nextTxt = Number.isFinite(Math.min(...syms.map((s) => state.activity[s].nextCandleAt).filter(Boolean))) ? " · nächste Kerzenprüfung in " + mmss(Math.min(...syms.map((s) => state.activity[s].nextCandleAt).filter(Boolean)) - Date.now()) : "";
+  const det = h("details", { class: "card fold", ontoggle: (e) => { e.target.open ? openSections.add("activity") : openSections.delete("activity"); }, ...(openSections.has("activity") ? { open: true } : {}) },
+    h("summary", {}, h("span", { class: "headline" }, dot, headline), h("span", { class: "muted" }, state.enabled && secs != null ? ` · letzte Prüfung vor ${Math.max(0, Math.round(secs))} s${nextTxt}` : "")), ...lines);
+  return det;
 }
 
 // Countdown läuft sekündlich, ohne das Popup neu zu zeichnen.
 setInterval(() => { const c = document.getElementById("countdown"); if (c) c.textContent = mmss(Number(c.dataset.t) - Date.now()); }, 1000);
+
+// ---------------------------------------------------------------- Positionen: Farbe = im Plus/Minus, seit wann, Klick = Details
+function positionsCard(positions) {
+  const { cfg, state } = status;
+  const items = positions.map((pos) => {
+    const px = state.activity[pos.symbol]?.price ?? pos.entryPrice, pnl = (px - pos.entryPrice) * pos.amount, pct = (px / pos.entryPrice - 1) * 100, up = pnl >= 0, open = expanded.has(pos.symbol);
+    const sgn = (x) => (x >= 0 ? "+" : "");
+    const head = h("div", { class: `posrow ${up ? "up" : "down"}`, onclick: () => { open ? expanded.delete(pos.symbol) : expanded.add(pos.symbol); draw(); } },
+      h("div", { class: "ptop" }, h("strong", {}, `${up ? "🟢" : "🔴"} ${pos.symbol}`), h("span", { class: up ? "ok" : "bad" }, `${sgn(pnl)}${fmt(pnl)} USD (${sgn(pct)}${pct.toFixed(2)} %)`)),
+      h("div", { class: "psub muted" }, `${strategyLabel(pos.strategyName)} · geöffnet ${since(pos.openedAt)} (${stamp(pos.openedAt)}) ${open ? "▲" : "▼"}`));
+    if (!open) return head;
+    const det = h("div", { class: "pdet" },
+      row("Menge · Einstieg · jetzt", `${fmt(pos.amount, 5)} · ${fmt(pos.entryPrice)} · ${fmt(px)}`),
+      row("Stop-Loss", `${fmt(pos.stop)} (${((pos.stop / pos.entryPrice - 1) * 100).toFixed(2)} %)`, "bad"), row("Take-Profit", `${fmt(pos.takeProfit)} (+${((pos.takeProfit / pos.entryPrice - 1) * 100).toFixed(2)} %)`, "ok"),
+      row("Marktphase beim Einstieg", REGIME_DE[pos.regime] ?? pos.regime ?? "–"),
+      row("KI-Trailing", pos.manual && pos.trailOff ? "aus" : pos.trailOff ? "aus (für diese Position)" : cfg.trail?.enabled ? "an" : "aus"));
+    if (pos.history?.length) det.append(h("div", { class: "muted ev" }, "Anpassungen: " + pos.history.slice(-3).map((e) => `${e.by}: ${e.kind === "stop" ? "Stop" : "Ziel"} ${fmt(e.from)}→${fmt(e.to)}`).join(" · ")));
+    det.append(h("div", { class: "muted ev" }, String(pos.reason || "").replace(/\s+/g, " ").slice(0, 260) + (String(pos.reason || "").length > 260 ? " …" : "")));
+    return h("div", {}, head, det);
+  });
+  return card(`Offene Positionen (${positions.length}/${cfg.risk.maxOpenPositions})`, ...(items.length ? items : [h("span", { class: "muted" }, "Keine offene Position.")]));
+}
 
 // ---------------------------------------------------------------- Status
 function renderStatus() {
@@ -100,7 +127,7 @@ function renderStatus() {
   if (cfg.backtest.profile === "playbook") out.push(h("div", { class: "warn" }, "PLAYBOOK-MODUS (nur Paper): 5 feste Strategien, der Bot wählt je Marktphase die passende. Sie wurden NICHT als profitabel geprüft – Trades sind experimentell."));
   if (live) out.push(h("div", { class: "warn" }, "LIVE-Modus: echte Orders mit echtem Geld. Der Stop-Loss wird nur vom Bot überwacht und wirkt nur, solange Browser und Wallet entsperrt laufen."));
 
-  out.push(activityCard());
+  out.push(positionsCard(positions));
   out.push(card("Bot",
     row("Zustand", state.enabled ? "läuft" : "gestoppt", state.enabled ? "ok" : "muted"),
     row("Letzter Durchlauf", ago(state.lastTick)),
@@ -118,11 +145,7 @@ function renderStatus() {
     h("div", { class: "btns" }, btn("NOT-AUS: Position schließen & stoppen", () => act(() => call("kill")), "danger")),
   ));
 
-  out.push(card(`Positionen (${positions.length}/${cfg.risk.maxOpenPositions})`,
-    positions.length ? positions.map((pos) => h("div", { class: "pos" }, h("strong", {}, pos.symbol),
-      row("Menge / Einstieg", `${fmt(pos.amount, 5)} @ ${fmt(pos.entryPrice)}`), row("Stop-Loss / Ziel", `${fmt(pos.stop)} / ${fmt(pos.takeProfit)}`),
-      row("Strategie", `${pos.strategyName} (${pos.regime})`)))
-      : h("span", { class: "muted" }, "Keine offene Position.")));
+  out.push(activityCard());
 
   const daily = state.risk?.startEquity;
   out.push(card("Konto & Risiko",
@@ -131,8 +154,8 @@ function renderStatus() {
     daily && row("Tagesstart-Eigenkapital", fmt(daily)),
     row("Risiko pro Trade", `${cfg.risk.riskPerTradePct}%`),
   ));
-  if (status.events.length) out.push(card("Letzte Ereignisse", ...status.events.slice(0, 5).map((e) =>
-    h("div", {}, h("span", { class: "muted" }, new Date(e.ts).toLocaleTimeString() + " "), e.text))));
+  if (status.events.length) out.push(h("details", { class: "card fold", ontoggle: (e) => { e.target.open ? openSections.add("events") : openSections.delete("events"); }, ...(openSections.has("events") ? { open: true } : {}) },
+    h("summary", {}, "Letzte Ereignisse"), ...status.events.slice(0, 6).map((e) => h("div", { class: "ev" }, h("span", { class: "muted" }, stamp(e.ts) + " "), e.text.split("\n")[0]))));
   return out;
 }
 

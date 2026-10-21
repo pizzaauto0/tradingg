@@ -52,16 +52,16 @@
     <div class="kpi hide-sm"><small>Bargeld</small><strong id="cash">–</strong></div>
     <div class="kpi hide-sm"><small>In Positionen gebunden</small><strong id="held">–</strong> <span class="muted" id="split"></span></div>
     <div class="grow"></div>
-    <button class="btn" id="allDashBtn" title="Dashboard mit allen drei Bots zusammen (Haupt-Modi)">📊 Dashboard</button>
     <button class="btn" id="remoteBtn" title="Dieselbe Oberfläche auf dem Handy oder im Browser">📱 Handy</button>
     <button class="btn" id="startAll">Alle starten</button>
     <button class="btn" id="stopAll">Alle stoppen</button>
     <button class="btn danger" id="killAll">NOT-AUS (alle)</button>
   </div>
-  <div id="note">Drei Bots – Währungen, Silber &amp; Gold, Krypto – handeln mit einem gemeinsamen Spielgeld-Konto. Strategien, Märkte und Einstellungen hat jeder Bot für sich.</div>
+  <div id="note" hidden></div>
   <div id="tabs"></div>
   <div id="subtabs" hidden></div>
   <div id="frames"></div>
+  <iframe id="dashframe" hidden style="flex:1;width:100%;border:0;position:static;display:block"></iframe>
   <div id="modeview" hidden></div>
   <div id="compare" hidden>
     <div class="pbox"><div class="prow"><b>Modus-Vergleich: alle Modi aller Bots nebeneinander</b><span><button class="btn" id="cmpLogs">📂 Log-Ordner öffnen</button> <button class="btn" id="cmpReset" title="Schatten-Läufe auf frisches Paper-Geld zurücksetzen">↺ Schatten-Läufe zurücksetzen</button></span></div>

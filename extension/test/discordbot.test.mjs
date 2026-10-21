@@ -44,11 +44,11 @@ test("Statistik: Bilanz netto, offene Trades mit Stop/Ziel, Käufe und Verkäufe
   const e = buildStatsEmbed(snap(), "stats"), text = JSON.stringify(e);
   assert.match(text, /Eigenkapital \*\*1012\.50 USD\*\*/); assert.match(text, /Gebühren gesamt 2\.10 USD/);
   assert.match(text, /EUR\/USD/); assert.match(text, /Stop-Loss 1\.0700/); assert.match(text, /Take-Profit 1\.1000/);
-  assert.match(text, /KAUF/); assert.match(text, /VERKAUF/); assert.equal(e.color, 0x2ecc71);
+  assert.match(text, /\*\*Kauf\*\*/); assert.match(text, /\*\*Verkauf\*\*/); assert.match(text, /Ausbruch/); assert.ok(!/breakout/.test(text), "Strategie mit Namen"); assert.match(text, /geöffnet <t:/); assert.equal(e.color, 0x2ecc71);
   for (const f of e.fields) assert.ok(f.value.length <= 1024 && f.name.length <= 256);
   const p = buildStatsEmbed(snap(), "positions"), tr = buildStatsEmbed(snap(), "trades");
-  assert.ok(!JSON.stringify(p).includes("VERKAUF") && JSON.stringify(p).includes("Stop-Loss"));
-  assert.ok(JSON.stringify(tr).includes("VERKAUF") && !JSON.stringify(tr).includes("Stop-Loss"));
+  assert.ok(!JSON.stringify(p).includes("Verkauf") && JSON.stringify(p).includes("Stop-Loss"));
+  assert.ok(JSON.stringify(tr).includes("Verkauf") && !JSON.stringify(tr).includes("Stop-Loss"));
 });
 
 class FakeWS {
@@ -80,7 +80,7 @@ test("Bot: meldet sich an, antwortet auf Knopfklick privat mit der Statistik", a
   assert.equal(calls.length, 1);
   assert.match(calls[0].url, /interactions\/I1\/T1\/callback$/);
   assert.equal(calls[0].body.type, 4); assert.equal(calls[0].body.data.flags, 64);   // nur für den Klickenden sichtbar
-  assert.match(JSON.stringify(calls[0].body.data.embeds), /Live-Statistik/);
+  assert.match(JSON.stringify(calls[0].body.data.embeds), /Übersicht/);
   assert.equal(calls[0].body.data.components[0].components[0].custom_id, "stats");   // „Aktualisieren“
   ws.emit(click("trades", { id: "I2", token: "T2", message: { flags: 64 } })); await new Promise((r) => setTimeout(r, 10));
   assert.equal(calls[1].body.type, 7);                                                // Klick in privater Antwort aktualisiert sie
@@ -173,7 +173,7 @@ test("Live-Nachricht: wird einmal gepostet, danach nur noch bearbeitet (höchste
   await runTick({ fetchFn: f, now: new Date(T0 + TF_MS + 5000) });
   const live = calls.filter((c) => c.body.embeds);
   assert.equal(live.length, 1); assert.equal(live[0].method, "POST"); assert.match(live[0].url, /\?wait=true$/);
-  assert.match(JSON.stringify(live[0].body.embeds), /Live-Statistik/);
+  assert.match(JSON.stringify(live[0].body.embeds), /Übersicht/);
   await runTick({ fetchFn: f, now: new Date(T0 + TF_MS + 6000) });
   assert.equal(calls.filter((c) => c.body.embeds).length, 1, "innerhalb einer Minute keine zweite Aktualisierung");
 });

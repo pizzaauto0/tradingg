@@ -1,7 +1,8 @@
 // Rahmen der Desktop-App: gemeinsames Paper-Konto oben, darunter ein Tab je Bot (Währungen, Silber & Gold, Krypto).
 // Jeder Tab ist die unveränderte Popup-Seite der Erweiterung mit ?bot=<id>.
+import { ago, strategyLabel } from "./lib/names.js";
 const BOTS = [["fx", "Währungen"], ["metals", "Silber & Gold"], ["crypto", "Krypto"]];
-const TABS = [...BOTS, ["profit", "💰 Profit"], ["compare", "📊 Vergleich"]];
+const TABS = [...BOTS, ["dash", "📊 Dashboard"], ["profit", "💰 Profit"], ["compare", "📊 Vergleich"]];
 const MODES = [["strict", "Streng"], ["explore", "Erkunden"], ["playbook", "Playbook"], ["winrate", "Trefferquote"], ["final", "Final-3"]];
 let modes = null;                 // Antwort von getModes (Vergleichstabelle), alle paar Sekunden aktualisiert
 const subMode = {};               // gewählter Modus je Bot (Standard: der Haupt-Modus)
@@ -19,7 +20,7 @@ function select(id) {
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.bot === id));
   document.querySelectorAll("iframe").forEach((f) => f.classList.toggle("active", f.dataset.bot === id));
   const isBot = BOTS.some(([b]) => b === id), sub = isBot ? (subMode[id] || mainOf(id)) : null, showFrame = isBot && sub === mainOf(id);
-  $("frames").hidden = !showFrame; $("profit").hidden = id !== "profit"; $("compare").hidden = id !== "compare"; $("modeview").hidden = !(isBot && !showFrame); $("subtabs").hidden = !isBot;
+  $("frames").hidden = !showFrame; $("dashframe").hidden = id !== "dash"; if (id === "dash" && !$("dashframe").src) $("dashframe").src = "__alldash.html"; $("profit").hidden = id !== "profit"; $("compare").hidden = id !== "compare"; $("modeview").hidden = !(isBot && !showFrame); $("subtabs").hidden = !isBot;
   if (id === "profit") renderProfit();
   if (id === "compare") renderCompare();
   if (isBot) { renderSubtabs(id); if (!showFrame) renderMode(id, sub); }
@@ -39,9 +40,11 @@ for (const [id, label] of BOTS) {
 {
   const b = document.createElement("button");
   b.dataset.bot = "profit"; b.id = "tab-profit"; b.textContent = "💰 Profit"; b.onclick = () => select("profit");
+  const dsh = document.createElement("button");
+  dsh.dataset.bot = "dash"; dsh.id = "tab-dash"; dsh.textContent = "📊 Dashboard"; dsh.onclick = () => select("dash");
   const c = document.createElement("button");
   c.dataset.bot = "compare"; c.id = "tab-compare"; c.textContent = "📊 Vergleich"; c.onclick = () => select("compare");
-  $("tabs").append(b, c);
+  $("tabs").append(dsh, b, c);
 }
 
 // ---- Modi: Unter-Tabs je Bot, Detailansicht eines Schatten-Modus, Vergleichstabelle ----
@@ -74,11 +77,11 @@ async function renderMode(bot, mode) {
   parts.push(grid);
   if (d.active.length) { const a = el("div", "pbox"); a.append(el("b", null, "Aktive Strategien: "), document.createTextNode(d.active.join(" · "))); parts.push(a); }
   const pos = el("div", "pbox"); pos.append(el("b", null, `Offene Positionen (${d.positions.length})`));
-  const pt = el("table", "mvtable"); pt.append(...[["Markt", "Menge", "Einstieg", "Jetzt", "Ergebnis", "Stop", "Ziel", "Strategie"], ...d.positions.map((q) => [q.symbol, q.amount.toFixed(5), q.entryPrice, q.price, sgn((q.price - q.entryPrice) * q.amount), q.stop, q.takeProfit, q.strategyName])]
+  const pt = el("table", "mvtable"); pt.append(...[["Markt", "Menge", "Einstieg", "Jetzt", "Ergebnis", "Stop", "Ziel", "Strategie", "Geöffnet"], ...d.positions.map((q) => [q.symbol, q.amount.toFixed(5), q.entryPrice, q.price, sgn((q.price - q.entryPrice) * q.amount), q.stop, q.takeProfit, strategyLabel(q.strategyName), q.openedAt ? ago(q.openedAt) : "–"])]
     .map((r, i) => { const tr = el("tr"); r.forEach((x, j) => { const td = el(i ? "td" : "th", i && j === 4 ? (Number(x) >= 0 ? "ok" : "bad") : "", typeof x === "number" ? (x >= 100 ? x.toFixed(2) : x.toFixed(4)) : x); tr.append(td); }); return tr; }));
   pos.append(d.positions.length ? pt : el("div", "muted", "keine offene Position")); parts.push(pos);
   const tr = el("div", "pbox"); tr.append(el("b", null, "Letzte Käufe & Verkäufe"));
-  const tt = el("table", "mvtable"); tt.append(...[["Zeit", "", "Markt", "Preis", "Ergebnis netto", "Strategie"], ...d.trades.slice(0, 15).map((t) => [new Date(t.ts).toLocaleString("de-DE"), t.action === "ENTRY" ? "Kauf" : "Verkauf", t.symbol, t.price, t.pnl == null ? "–" : sgn(t.pnl), t.strategy || ""])]
+  const tt = el("table", "mvtable"); tt.append(...[["Zeit", "", "Markt", "Preis", "Ergebnis netto", "Strategie"], ...d.trades.slice(0, 15).map((t) => [new Date(t.ts).toLocaleString("de-DE"), t.action === "ENTRY" ? "Kauf" : "Verkauf", t.symbol, t.price, t.pnl == null ? "–" : sgn(t.pnl), strategyLabel(t.strategy || "")])]
     .map((r, i) => { const row = el("tr"); r.forEach((x, j) => { const td = el(i ? "td" : "th", i && j === 4 && x !== "–" ? (Number(x) >= 0 ? "ok" : "bad") : "", typeof x === "number" ? (x >= 100 ? x.toFixed(2) : x.toFixed(4)) : x); row.append(td); }); return row; }));
   tr.append(d.trades.length ? tt : el("div", "muted", "noch keine Trades")); parts.push(tr);
   if (!d.main && d.curve.length > 1) { const c = el("div", "pbox"); c.append(el("b", null, "Eigenkapital-Verlauf dieses Modus")); const cv = el("canvas"); cv.id = "mvcurve"; cv.style.cssText = "width:100%;height:180px;display:block"; c.append(cv); parts.push(c); box._curve = d; }
@@ -153,7 +156,6 @@ async function openRemote() {
   draw(await bridge.remoteGet());
   modal.hidden = false;
 }
-$("allDashBtn").onclick = () => { if (bridge?.open) bridge.open("alldash", ""); else window.open("__alldash.html", "_blank"); };   // App: eigenes Fenster; Handy/Browser: neuer Tab
 $("remoteBtn").onclick = () => openRemote().catch((e) => alert(e.message));
 $("remoteModal").onclick = (e) => { if (e.target === $("remoteModal")) $("remoteModal").hidden = true; };
 
@@ -254,14 +256,14 @@ async function refresh() {
       el.querySelector(".lbl").textContent = `${BOTS.find(([id]) => id === b.id)[1]}${b.positions ? ` (${b.positions})` : ""}`;
       el.title = `${b.enabled ? "läuft" : "gestoppt"} · ${b.positions} Position(en) · ${b.approvedActive} aktive Strategie(n)${b.lastError && b.enabled ? " · Fehler: " + b.lastError : ""}`;
     }
-    $("note").textContent = NOTE;
+    $("note").hidden = true;
   } catch (e) { showDiag(e.message); }
 }
 
-const NOTE = $("note").textContent;
 async function showDiag(msg) {   // statt leerer Seite: was ist los? (zum Weitergeben/Screenshot)
   let d = {};
   try { d = await (window.electronBridge || {}).diag(); } catch { /* ohne Diagnose */ }
+  $("note").hidden = false;
   $("note").style.cssText = "white-space:pre-wrap;color:#fff;background:#7a1f1f;padding:6px 16px;font-size:12px";
   $("note").textContent = `Der Hintergrunddienst antwortet nicht: ${msg}\n` + `Version ${d.version} · ${d.platform} · Electron ${d.electron} · ext vorhanden: ${d.extExists} · Hintergrund: ${d.bgUrl} (lädt: ${d.bgLoading})\n` +
     `Datenordner: ${d.userData} · gespeicherte Schlüssel: ${(d.storageKeys || []).join(", ") || "–"}\n` + `Letzte Fehler:\n${(d.errors || []).join("\n") || "(keine)"}`;

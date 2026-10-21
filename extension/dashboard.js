@@ -1,3 +1,4 @@
+import { ago as since, stamp, strategyLabel } from "./lib/names.js";
 // Dashboard: Kerzenchart mit Trend (EMA 20/50), Einstieg/Stop/Ziel der offenen Position, Live-Gewinn und Signal-Matrix.
 const BOT = new URLSearchParams(location.search).get("bot") || "crypto";
 const call = async (type, extra = {}) => { const r = await chrome.runtime.sendMessage({ type, bot: BOT, ...extra }); if (!r?.ok) throw new Error(r?.error); return r.result; };
@@ -65,8 +66,8 @@ function render() {
   if (pos) {
     const span = pos.takeProfit - pos.stop, at = Math.min(1, Math.max(0, (price - pos.stop) / span));
     const risk = (pos.entryPrice - pos.stop) * pos.amount, reward = (pos.takeProfit - pos.entryPrice) * pos.amount;
-    panels.push(h("div", { class: "card" }, h("h3", {}, "Offene Position"),
-      row("Strategie", pos.strategyName), row("Marktphase beim Einstieg", pos.regime), row("Eingestiegen", new Date(pos.openedAt).toLocaleString("de-DE")),
+    panels.push(h("div", { class: `card posdash ${pnl >= 0 ? "up" : "down"}` }, h("h3", {}, `${pnl >= 0 ? "🟢" : "🔴"} Offene Position · ${pnl >= 0 ? "im Plus" : "im Minus"}`),
+      row("Strategie", strategyLabel(pos.strategyName)), row("Marktphase beim Einstieg", { uptrend: "Aufwärts", downtrend: "Abwärts", sideways: "Seitwärts" }[pos.regime] ?? pos.regime), row("Geöffnet", `${since(pos.openedAt)} (${stamp(pos.openedAt)})`),
       row("Einstieg / Menge", `${fmt(pos.entryPrice)} · ${pos.amount}`), row("Stop-Loss", fmt(pos.stop), "bad"), row("Ziel", fmt(pos.takeProfit), "ok"),
       row("Risiko / Chance", `${fmt(risk)} / ${fmt(reward)} USD`),
       h("div", { class: "bar" }, h("b", { style: `left:${(at * 100).toFixed(1)}%` })),
@@ -76,9 +77,9 @@ function render() {
   panels.unshift(tradePanel(pos, price));
   panels.push(h("div", { class: "card" }, h("h3", {}, `Signal-Matrix · ${selected}`),
     (a.checks || []).length ? h("table", {}, h("tr", {}, h("th", {}, "Strategie"), h("th", {}, "passt zur Phase"), h("th", {}, "Einstiegssignal")),
-      ...a.checks.map((c) => h("tr", {}, h("td", {}, c.name), h("td", {}, c.fits ? "ja" : "nein"), h("td", { class: `sig ${c.signal ? "y" : "n"}` }, c.signal ? "JA" : "nein"))))
+      ...a.checks.map((c) => h("tr", {}, h("td", {}, strategyLabel(c.name)), h("td", {}, c.fits ? "ja" : "nein"), h("td", { class: `sig ${c.signal ? "y" : "n"}` }, c.signal ? "JA" : "nein"))))
       : h("p", { class: "muted" }, "Keine aktive Strategie für diesen Markt. Im Popup „Strategien neu prüfen“ drücken."),
-    h("div", { class: "hint" }, `Gewählt: ${a.strategy || "keine"} · geprüft bei jeder neuen Kerze (${data.timeframe}); nächste ca. ${a.nextCandleAt ? new Date(a.nextCandleAt).toLocaleTimeString("de-DE") : "–"}`)));
+    h("div", { class: "hint" }, `Gewählt: ${a.strategy ? strategyLabel(a.strategy) : "keine"} · geprüft bei jeder neuen Kerze (${data.timeframe}); nächste ca. ${a.nextCandleAt ? new Date(a.nextCandleAt).toLocaleTimeString("de-DE") : "–"}`)));
   panels.push(h("div", { class: "card" }, h("h3", {}, "Letzte Entscheidungen"),
     data.decisions.length ? h("table", {}, ...data.decisions.map((d) => h("tr", {}, h("td", { class: "muted" }, new Date(d.ts).toLocaleTimeString("de-DE")), h("td", {}, d.text.replace(/^.*? · /, "")))))
       : h("p", { class: "muted" }, "Noch keine geprüfte Kerze."),

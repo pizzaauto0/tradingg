@@ -5,6 +5,10 @@ import { positionSize, RiskManager, stopAndTarget } from "./risk.js";
 import { selectStrategy } from "./pipeline.js";
 import { fmtPx, timeframeSeconds } from "./util.js";
 import { planTrail } from "./trail.js";
+import { ago, stamp as stampTxt, strategyLabel } from "./names.js";
+
+const REGIME_DE = { uptrend: "Aufwärts", downtrend: "Abwärts", sideways: "Seitwärts" };
+const pctOf = (to, from) => `${to >= from ? "+" : ""}${(((to / from) - 1) * 100).toFixed(1)} %`;
 import { symbolOf } from "./config.js";
 
 const MIN_NOTIONAL_USD = 5;
@@ -112,7 +116,7 @@ export class Engine {
       const any = (state.approved || []).some((r) => r.symbol === sym && r.active !== false);
       return any ? `keine aktive Strategie passt zur Marktphase „${a.regime}“` : "keine zugelassene Strategie (Backtest nicht bestanden) – der Bot wartet";
     }
-    if (!a.signal) return `kein Einstiegssignal der Strategie ${a.strategy.split("(")[0]}`;
+    if (!a.signal) return `kein Einstiegssignal („${strategyLabel(a.strategy)}“)`;
     const blocked = state.entryBlocked?.[sym];
     if (blocked && Date.now() - Date.parse(blocked.ts) < 3 * 3.6e6) return `Signal vorhanden, aber kein Kauf: ${blocked.text}`;
     const [ok, why] = this.risk.canOpen(Object.keys(state.positions).length);
@@ -126,16 +130,18 @@ export class Engine {
     const { state } = this;
     if (state.lastHourly && now - Date.parse(state.lastHourly) < 3_600_000) return;
     const h = state.hourly || { entries: 0, exits: 0, pnl: 0 }, open = Object.values(state.positions);
-    const lines = [`🕐 **Stundenbericht** ${now.toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })} · Eigenkapital (gemeinsames Konto) ${equity.toFixed(2)} USD · Positionen ${open.length}/${this.cfg.risk.maxOpenPositions}` +
-      `${this.risk.halted ? " · TAGESLIMIT ERREICHT" : ""}`,
-      `Seit dem letzten Bericht: ${h.entries} Kauf/Käufe, ${h.exits} Verkauf/Verkäufe${h.exits ? `, Ergebnis ${h.pnl >= 0 ? "+" : ""}${h.pnl.toFixed(2)} USD netto` : ""}`];
-    for (const sym of this.symbols) {
-      const a = state.activity[sym];
-      lines.push(`• ${sym}${a?.price != null ? " " + fmtPx(a.price) : ""}${a?.regime ? " · " + a.regime : ""}: ${state.positions[sym] ? "🟢 gekauft – " : "kein Kauf – "}${this.whyNot(sym)}`);
-    }
+    const lines = [`🕐 **Stundenbericht** · ${this.botLabel ? this.botLabel + " · " : ""}${now.toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })}`,
+      `Eigenkapital ${equity.toFixed(2)} USD · Positionen ${open.length}/${this.cfg.risk.maxOpenPositions}${this.risk.halted ? " · ⛔ Tageslimit erreicht" : ""}`,
+      `Seit dem letzten Bericht: ${h.entries} Kauf/Käufe, ${h.exits} Verkauf/Verkäufe${h.exits ? `, Ergebnis ${h.pnl >= 0 ? "+" : ""}${h.pnl.toFixed(2)} USD netto` : ""}`, ""];
     for (const p of open) {
       const px = this.lastPrices[p.symbol] ?? p.entryPrice, pnl = (px - p.entryPrice) * p.amount;
-      lines.push(`📌 offen: ${p.symbol} ${p.amount.toFixed(5)} @ ${fmtPx(p.entryPrice)} | jetzt ${fmtPx(px)} (${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} USD) | Stop ${fmtPx(p.stop)} | Ziel ${fmtPx(p.takeProfit)} | ${p.strategyName}`);
+      lines.push(`${pnl >= 0 ? "🟢" : "🔴"} **${p.symbol}** ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} USD (${pctOf(px, p.entryPrice)}) · ${strategyLabel(p.strategyName)} · geöffnet ${ago(p.openedAt)} · Stop ${fmtPx(p.stop)} · Ziel ${fmtPx(p.takeProfit)}`);
+    }
+    if (open.length) lines.push("");
+    for (const sym of this.symbols) {
+      if (state.positions[sym]) continue;
+      const a = state.activity[sym];
+      lines.push(`• ${sym}${a?.price != null ? " " + fmtPx(a.price) : ""}${a?.regime ? " · " + (REGIME_DE[a.regime] || a.regime) : ""}: kein Kauf – ${this.whyNot(sym)}`);
     }
     state.hourly = { entries: 0, exits: 0, pnl: 0 };
     state.lastHourly = now.toISOString();
@@ -274,7 +280,8 @@ export class Engine {
       strategy: "Manuell", regime: market?.regime ?? "–", reason, equity: await this.equity() });
     const h = (this.state.hourly ||= { entries: 0, exits: 0, pnl: 0 });
     h.entries++;
-    await this.notify(`ENTRY ${sym} ${fill.amount.toFixed(5)} @ ${fmtPx(fill.price)} (Wert ${(fill.amount * fill.price).toFixed(2)} USD, Gebühr ${fill.fee.toFixed(2)} USD) | Stop-Loss ${fmtPx(st)} | Take-Profit ${fmtPx(tp)} | Risiko ${riskCash.toFixed(2)} USD | Manuell\nWarum gekauft: ${reason}`);
+    await this.notify(`ENTRY ${sym} · Manuell\nKauf @ ${fmtPx(fill.price)} · Menge ${fill.amount.toFixed(5)} · Wert ${(fill.amount * fill.price).toFixed(2)} USD · Gebühr ${fill.fee.toFixed(2)} USD\n` +
+      `Stop-Loss ${fmtPx(st)} (${pctOf(st, fill.price)}) · Take-Profit ${fmtPx(tp)} (${pctOf(tp, fill.price)}) · Risiko ${riskCash.toFixed(2)} USD\nWarum gekauft: manuell im Dashboard ausgelöst`);
     return `${sym} gekauft`;
   }
 
@@ -299,8 +306,9 @@ export class Engine {
     h.exits++; h.pnl += pnl;
     await this.trackStreak(pnl, now);
     const held = (Date.parse(now.toISOString()) - Date.parse(pos.openedAt)) / 3.6e6, costs = pos.entryFee + fill.fee;
-    await this.notify(`EXIT ${pos.symbol} @ ${fmtPx(fill.price)} (Einstieg ${fmtPx(pos.entryPrice)}) | PnL ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} USD netto nach Gebühren ${costs.toFixed(2)} USD` +
-      ` | Stop war ${fmtPx(pos.stop)}, Ziel ${fmtPx(pos.takeProfit)} | gehalten ${held < 48 ? held.toFixed(1) + " h" : (held / 24).toFixed(1) + " Tage"}\nWarum verkauft: ${reason}`);
+    await this.notify(`EXIT ${pos.symbol} · ${strategyLabel(pos.strategyName)}\n` +
+      `Verkauf @ ${fmtPx(fill.price)} (Einstieg ${fmtPx(pos.entryPrice)}, ${pctOf(fill.price, pos.entryPrice)}) · Ergebnis ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} USD netto (Gebühren ${costs.toFixed(2)} USD) · gehalten ${held < 48 ? held.toFixed(1) + " h" : (held / 24).toFixed(1) + " Tage"}\n` +
+      `Stop war ${fmtPx(pos.stop)}, Ziel ${fmtPx(pos.takeProfit)}\nWarum verkauft: ${reason}`);
   }
 
   // Verlustserie: nach maxLossStreak Verlusten in Folge keine neuen Käufe dieses Bots für pauseHours (Abkühlphase); ein Gewinn setzt die Serie zurück
@@ -378,8 +386,8 @@ export class Engine {
     };
     if (isNew) {
       const what = !market ? `Analyse nicht möglich (${note})`
-        : !sel ? `${market.regime}: keine zugelassene Strategie für diese Marktphase → warte`
-        : `${market.regime}: ${sel.strategy.name} → Signal ${signal ? "JA" : "nein"}`;
+        : !sel ? `${REGIME_DE[market.regime] || market.regime}: keine zugelassene Strategie für diese Marktphase → warte`
+        : `${REGIME_DE[market.regime] || market.regime}: ${strategyLabel(sel.strategy.name)} → Signal ${signal ? "JA" : "nein"}`;
       const log = this.state.decisions ||= [];
       this.log("info", `${sym} · Kerze ${new Date(stamp).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })} · ${what}${this.state.positions[sym] ? " · Position offen" : ""}${this.risk.halted ? " · Tageslimit aktiv" : ""}`);
       log.push({ ts: now.toISOString(), symbol: sym, text: `${sym} · Kerze geprüft · ${what}${this.state.positions[sym] ? " · Position offen" : ""}${this.risk.halted ? " · Tageslimit aktiv" : ""}` });
@@ -438,8 +446,10 @@ export class Engine {
       amount: fill.amount, fee: fill.fee, pnl: null, strategy: strategy.name, regime: market.regime, reason, equity: await this.equity() });
     const h = (this.state.hourly ||= { entries: 0, exits: 0, pnl: 0 });
     h.entries++;
-    await this.notify(`ENTRY ${sym} ${fill.amount.toFixed(5)} @ ${fmtPx(fill.price)} (Wert ${(fill.amount * fill.price).toFixed(2)} USD, Gebühr ${fill.fee.toFixed(2)} USD) | Stop-Loss ${fmtPx(stop)} | Take-Profit ${fmtPx(takeProfit)}` +
-      ` | Risiko ${riskCash.toFixed(2)} USD | ${strategy.name} | ${market.regime}\nWarum gekauft: ${reason}`);
+    const whyShort = `${sel.record.explore ? "experimentell (nicht auf Mindestwerte geprüft) · " : ""}Signal der Strategie „${strategyLabel(strategy.name)}“ bei Marktphase ${REGIME_DE[market.regime] || market.regime} · Backtest: Sharpe ${(sel.record.metrics?.sharpe ?? 0).toFixed(2)}, Trefferquote ${(sel.record.metrics?.win_rate_pct ?? 0).toFixed(0)} %`;
+    await this.notify(`ENTRY ${sym} · ${strategyLabel(strategy.name)}\n` +
+      `Kauf @ ${fmtPx(fill.price)} · Menge ${fill.amount.toFixed(5)} · Wert ${(fill.amount * fill.price).toFixed(2)} USD · Gebühr ${fill.fee.toFixed(2)} USD\n` +
+      `Stop-Loss ${fmtPx(stop)} (${pctOf(stop, fill.price)}) · Take-Profit ${fmtPx(takeProfit)} (${pctOf(takeProfit, fill.price)}) · Risiko ${riskCash.toFixed(2)} USD\nWarum gekauft: ${whyShort}`);
   }
 
   // Testtrade (nur Paper): eröffnet sofort eine Position, ohne auf ein Strategie-Signal zu warten.

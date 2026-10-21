@@ -68,7 +68,7 @@ test("Kauf, Verkauf und Stundenbericht kommen mit Stop, Ziel und Begründung an 
   await runTick({ fetchFn: f, now: at(world.dfs["SOL/USD"].t.at(-1)) });
   const buy = posts.find((p) => p.includes("KAUF"));
   assert.ok(buy, "Kaufmeldung");
-  assert.match(buy, /\[PAPER\]/); assert.match(buy, /Stop-Loss \d/); assert.match(buy, /Take-Profit \d/); assert.match(buy, /Gebühr \d/); assert.match(buy, /Warum gekauft: .*Stop .*Ziel .*Risiko/s);
+  assert.match(buy, /\[PAPER\]/); assert.match(buy, /Stop-Loss \d/); assert.match(buy, /Take-Profit \d/); assert.match(buy, /Gebühr \d/); assert.match(buy, /Warum gekauft: .*Signal der Strategie „Ausbruch“ bei Marktphase Aufwärts/); assert.match(buy, /· Ausbruch\n/, "Strategie mit Namen statt technischer Bezeichnung"); assert.ok(!/breakout\(/.test(buy));
 
   const pos = (await getStatus()).state.positions["SOL/USD"];
   const next = shifted(shifted(trend(1502, true)));
@@ -78,7 +78,7 @@ test("Kauf, Verkauf und Stundenbericht kommen mit Stop, Ziel und Begründung an 
   await runTick({ fetchFn: f, now: at(next.t.at(-1)) });
   const sell = posts.find((p) => p.includes("VERKAUF"));
   assert.ok(sell, "Verkaufsmeldung");
-  assert.match(sell, /🔴/); assert.match(sell, /Einstieg \d/); assert.match(sell, /nach Gebühren/); assert.match(sell, /Stop war .*Ziel/); assert.match(sell, /Warum verkauft: Stop-Loss/);
+  assert.match(sell, /🔴/); assert.match(sell, /Einstieg \d/); assert.match(sell, /netto \(Gebühren \d/); assert.match(sell, /Stop war .*Ziel/); assert.match(sell, /Warum verkauft: Stop-Loss/);
   assert.ok(posts.every((p) => p.length <= 2000));
 
   // Stundenbericht nach einer Stunde: Käufe/Verkäufe seit dem letzten Bericht und Grund je Markt
@@ -90,8 +90,8 @@ test("Kauf, Verkauf und Stundenbericht kommen mit Stop, Ziel und Begründung an 
 test("Hilfsfunktionen: lange Texte werden geteilt, Köpfe verziert", () => {
   const parts = chunkText(("x".repeat(100) + "\n").repeat(60));
   assert.ok(parts.length >= 3 && parts.every((p) => p.length <= 1900));
-  assert.match(decorate("EXIT SOL/USD | PnL +1.00"), /^✅ \*\*VERKAUF\*\*/);
-  assert.match(decorate("EXIT SOL/USD | PnL -1.00"), /^🔴/);
+  assert.match(decorate("EXIT SOL/USD\nVerkauf @ 1 · Ergebnis +1.00 USD"), /^✅ \*\*VERKAUF\*\*/);
+  assert.match(decorate("EXIT SOL/USD\nVerkauf @ 1 · Ergebnis -1.00 USD"), /^🔴/);
   assert.match(decorate("WARNUNG: x"), /^⚠️/);
 });
 

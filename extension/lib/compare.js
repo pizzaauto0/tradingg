@@ -2,6 +2,7 @@
 // die übrigen Modi (strict, explore, playbook, winrate, final) laufen als Schatten-Läufe mit EIGENEM Paper-Geld und eigenen Positionen mit –
 // gleiche Märkte, gleiche Regeln, nur andere Strategie-Auswahl. So entstehen vergleichbare Statistiken. Reine Hilfsfunktionen (kein Speicherzugriff).
 import { fmtPx } from "./util.js";
+import { strategyLabel, stamp } from "./names.js";
 import { botAssets } from "./config.js";
 import { performance } from "./profit.js";
 
@@ -61,13 +62,13 @@ export function logText(d, kind) {
   L.push(`Offene Positionen (${Object.keys(d.positions).length}):`);
   for (const q of Object.values(d.positions)) {
     const px = d.prices?.[q.symbol] ?? q.entryPrice;
-    L.push(`  • ${q.symbol} ${f2(q.amount, 5)} @ ${fmtPx(q.entryPrice)} → ${fmtPx(px)} (${sg((px - q.entryPrice) * q.amount)} USD) | Stop ${fmtPx(q.stop)} | Ziel ${fmtPx(q.takeProfit)} | ${q.strategyName}`);
+    L.push(`  • ${q.symbol} ${f2(q.amount, 5)} @ ${fmtPx(q.entryPrice)} → ${fmtPx(px)} (${sg((px - q.entryPrice) * q.amount)} USD) | Stop ${fmtPx(q.stop)} | Ziel ${fmtPx(q.takeProfit)} | ${strategyLabel(q.strategyName)} | seit ${q.openedAt ? stamp(q.openedAt) : "–"}`);
   }
   if (!Object.keys(d.positions).length) L.push("  keine");
   L.push("");
   L.push(`Käufe und Verkäufe im Zeitraum (${d.trades.length}):`);
   for (const t of d.trades) {
-    L.push(`  ${new Date(t.ts).toLocaleTimeString("de-DE")} ${t.action === "ENTRY" ? "KAUF   " : t.action === "EXIT" ? "VERKAUF" : t.action} ${t.symbol} @ ${fmtPx(t.price)}${t.pnl != null ? ` | Ergebnis netto ${sg(t.pnl)} USD` : ""} | ${t.strategy || ""}`);
+    L.push(`  ${new Date(t.ts).toLocaleTimeString("de-DE")} ${t.action === "ENTRY" ? "KAUF   " : t.action === "EXIT" ? "VERKAUF" : t.action} ${t.symbol} @ ${fmtPx(t.price)}${t.pnl != null ? ` | Ergebnis netto ${sg(t.pnl)} USD` : ""} | ${strategyLabel(t.strategy || "")}`);
     if (t.reason) L.push(`      Warum: ${String(t.reason).replace(/\s*\n\s*/g, " ").slice(0, 400)}`);
   }
   if (!d.trades.length) L.push("  keine");

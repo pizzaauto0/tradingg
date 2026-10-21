@@ -163,7 +163,7 @@ test("Aktivität: Bot zeigt Kurs, Marktphase, Strategie und protokolliert jede g
   world.df = trendWorld(1501, false).df; world.df.t = world.df.t.map((t) => t + TF_MS);
   await runTick({ fetchFn: f, now: at(world.df.t.at(-1)) });
   s = await getStatus();
-  assert.match(s.state.decisions[0].text, /SOL\/USD · Kerze geprüft · uptrend: breakout.*Signal (JA|nein)/);
+  assert.match(s.state.decisions[0].text, /SOL\/USD · Kerze geprüft · Aufwärts: Ausbruch → Signal (JA|nein)/);
   await handle({ type: "tickNow" }, f);
 });
 

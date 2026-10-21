@@ -1,4 +1,5 @@
 // Dashboard „Alle“: die drei Bots (Währungen, Silber & Gold, Krypto) mit ihrem HAUPT-Modus zusammengefasst; weitere Tabs zeigen je Bot das ausführliche Dashboard mit Chart.
+import { ago, stamp, strategyLabel } from "./lib/names.js";
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const call = async (type, extra = {}) => { const r = await chrome.runtime.sendMessage({ type, ...extra }); if (!r?.ok) throw new Error(r?.error || "Keine Antwort"); return r.result; };
@@ -23,6 +24,7 @@ for (const [id, label] of [["all", "📊 Alle"], ...BOTS]) {
 for (const [id] of BOTS) { const f = el("iframe"); f.dataset.bot = id; f.src = `dashboard.html?bot=${id}`; $("frames").append(f); }
 
 let data = null;
+const openPos = new Set();
 const kpi = (label, value, sub, cls) => { const d = el("div", "k"); d.append(el("small", null, label), el("strong", cls || "", value)); if (sub) d.append(el("div", "sub", sub)); return d; };
 const table = (head, rows, cls) => {
   const t = el("table"), hr = el("tr");
@@ -52,17 +54,28 @@ async function render() {
   parts.push(g2);
 
   const pos = d.bots.flatMap((b) => b.positions.map((p) => ({ ...p, bot: b })));
-  const sell = (p) => { const bt = el("button", "btn", "Verkaufen"); bt.onclick = async () => { if (!confirm(`${p.symbol} jetzt zum Marktpreis verkaufen?`)) return; try { alert(await call("sell", { bot: p.bot.id, symbol: p.symbol })); } catch (e) { alert(e.message); } render(); }; return bt; };
-  parts.push(sec(`Offene Positionen (${pos.length})`, pos.length ? table(["Markt", "Bot", "Menge", "Einstieg", "Jetzt", "Ergebnis", "Stop", "Ziel", "Strategie", ""],
-    pos.map((p) => { const pnl = (p.price - p.entryPrice) * p.amount; return [p.symbol, { text: p.bot.label, cls: "" }, p.amount.toFixed(5), px(p.entryPrice), px(p.price), { text: `${sg(pnl)} USD (${sg((p.price / p.entryPrice - 1) * 100)} %)`, cls: pnl >= 0 ? "ok" : "bad" }, px(p.stop), px(p.takeProfit), p.strategyName, { node: sell(p) }]; })) : el("div", "muted", "keine offene Position")));
+  const sell = (p) => { const bt = el("button", "btn", "Verkaufen"); bt.onclick = async (ev) => { ev.stopPropagation(); if (!confirm(`${p.symbol} jetzt zum Marktpreis verkaufen?`)) return; try { alert(await call("sell", { bot: p.bot.id, symbol: p.symbol })); } catch (e) { alert(e.message); } render(); }; return bt; };
+  const posBox = el("div", "poslist");
+  for (const p of pos) {
+    const pnl = (p.price - p.entryPrice) * p.amount, up = pnl >= 0, key = `${p.bot.id}:${p.symbol}`;
+    const row = el("div", `prow2 ${up ? "up" : "down"}`), top = el("div", "ptop2");
+    top.append(el("b", null, `${up ? "🟢" : "🔴"} ${p.symbol}`), el("span", up ? "ok" : "bad", `${sg(pnl)} USD (${sg((p.price / p.entryPrice - 1) * 100)} %)`),
+      el("span", "muted", `${p.bot.label} · ${strategyLabel(p.strategyName)} · geöffnet ${ago(p.openedAt)}`), sell(p));
+    const det = el("div", "pdet2"); det.hidden = !openPos.has(key);
+    det.append(el("div", null, `Geöffnet: ${p.openedAt ? stamp(p.openedAt) : "–"} (${ago(p.openedAt)})`), el("div", null, `Menge ${p.amount.toFixed(5)} · Einstieg ${px(p.entryPrice)} → jetzt ${px(p.price)}`),
+      el("div", null, `Stop-Loss ${px(p.stop)} · Take-Profit ${px(p.takeProfit)}`), el("div", "muted", `Strategie: ${strategyLabel(p.strategyName)}`));
+    row.onclick = () => { det.hidden = !det.hidden; det.hidden ? openPos.delete(key) : openPos.add(key); };
+    row.append(top, det); posBox.append(row);
+  }
+  parts.push(sec(`Offene Positionen (${pos.length}) – zum Aufklappen anklicken`, pos.length ? posBox : el("div", "muted", "keine offene Position")));
 
   const mk = d.bots.flatMap((b) => b.markets.map((m) => ({ ...m, bot: b })));
   parts.push(sec(`Märkte (${mk.length})`, table(["Markt", "Bot", "Kurs", "Phase", "Strategie", "Signal"], mk.map((m) => [m.symbol, m.bot.label, m.error ? { text: "Daten nicht ladbar", cls: "bad" } : px(m.price), REGIME[m.regime] || "–",
-    m.strategy ? m.strategy.split("(")[0] : { text: m.error ? "" : m.price == null ? "noch keine Daten" : "keine passende", cls: "muted" }, m.signal == null ? "–" : { text: m.signal ? "JA" : "nein", cls: m.signal ? "sig" : "" }]))));
+    m.strategy ? strategyLabel(m.strategy) : { text: m.error ? "" : m.price == null ? "noch keine Daten" : "keine passende", cls: "muted" }, m.signal == null ? "–" : { text: m.signal ? "JA" : "nein", cls: m.signal ? "sig" : "" }]))));
 
   parts.push(sec("Letzte Käufe & Verkäufe (alle Bots)", d.trades.length ? table(["Zeit", "", "Markt", "Bot", "Preis", "Ergebnis netto", "Strategie"], d.trades.slice(0, 20).map((t) => [new Date(t.ts).toLocaleString("de-DE"),
     { text: t.action === "ENTRY" ? "Kauf" : "Verkauf", cls: t.action === "ENTRY" ? "ok" : "bad" }, t.symbol, d.bots.find((b) => b.id === (t.bot || "crypto"))?.label || "", px(t.price),
-    t.pnl == null ? "–" : { text: `${sg(t.pnl)} USD`, cls: t.pnl >= 0 ? "ok" : "bad" }, t.strategy || ""])) : el("div", "muted", "noch keine Trades")));
+    t.pnl == null ? "–" : { text: `${sg(t.pnl)} USD`, cls: t.pnl >= 0 ? "ok" : "bad" }, strategyLabel(t.strategy || "")])) : el("div", "muted", "noch keine Trades")));
 
   const cv = el("canvas"); parts.push(sec("Eigenkapital-Verlauf (gemeinsames Konto)", cv));
   $("all").replaceChildren(...parts);

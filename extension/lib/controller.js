@@ -350,7 +350,7 @@ export async function getLiveStats() {
   const account = await getAccount(), bots = [];
   for (const id of BOT_IDS) {
     const cfg = await loadConfig(id), st = await loadState(cfg, id);
-    bots.push({ id, label: BOTS[id].label, enabled: st.enabled, positions: Object.values(st.positions).map((p) => ({ ...p, price: st.activity?.[p.symbol]?.price ?? p.entryPrice })) });
+    bots.push({ id, label: BOTS[id].label, modeLabel: MODE_LABEL[cfg.backtest.profile], enabled: st.enabled, positions: Object.values(st.positions).map((p) => ({ ...p, price: st.activity?.[p.symbol]?.price ?? p.entryPrice })) });
   }
   return { account, bots, trades: (await getLocal("trades", [])).slice(-300), profit: await getProfit(), now: new Date().toISOString() };
 }

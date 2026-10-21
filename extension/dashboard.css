@@ -26,3 +26,5 @@ body.dash { width:auto; min-height:100vh; }
 .fld.chk { display:flex; gap:6px; align-items:center; margin:8px 0; color:var(--fg); } .fld.chk input { width:auto; margin:0; }
 
 .zoom { margin-left:auto; display:flex; gap:6px; align-items:center; } .zoom .btn { padding:2px 10px; } #chart { cursor:crosshair; user-select:none; }
+
+.posdash.up { border-left:4px solid var(--ok); } .posdash.down { border-left:4px solid var(--bad); }
