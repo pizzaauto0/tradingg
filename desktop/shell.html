@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Trading-Bot</title>
   <link rel="stylesheet" href="ui.css">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.png">
+  <meta name="theme-color" content="#15181d">
   <style>
     [hidden] { display: none !important; }
     html, body { height: 100%; } body { display: flex; flex-direction: column; overflow: hidden; }
@@ -30,6 +33,14 @@
     #modeview, #compare { flex: 1; overflow: auto; padding-bottom: 16px; } .mvhead { padding: 10px 16px 0; } .mvhead h2 { margin: 0 0 2px; font-size: 16px; } .tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; border: 1px solid var(--line); color: var(--muted); }
     #cmpTable, .mvtable { width: 100%; border-collapse: collapse; } #cmpTable td, #cmpTable th, .mvtable td, .mvtable th { padding: 5px 7px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; } #cmpTable td:first-child, #cmpTable th:first-child, .mvtable td:first-child, .mvtable th:first-child { text-align: left; }
     #cmpTable tr.grp td { background: var(--card); font-weight: 700; text-align: left; } #cmpTable tr.best td { background: rgba(46,160,67,.12); } #cmpTable tr.offrow td { color: var(--muted); opacity: .6; }
+    .modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 12px; }
+    .dlg { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; max-width: 560px; width: 100%; max-height: 92vh; overflow: auto; } .dlg h3 { margin: 0 0 8px; } .dlg .qr { display: flex; gap: 12px; align-items: center; margin: 8px 0; padding: 8px; border: 1px solid var(--line); border-radius: 8px; } .dlg code { word-break: break-all; font-size: 11px; user-select: all; }
+    @media (max-width: 700px) {
+      .hide-sm { display: none; } #top .btn { padding: 4px 9px; font-size: 12px; } .kpi small { font-size: 9px; }
+      #top { gap: 6px 14px; padding: 8px 10px; } #top h1 { font-size: 14px; } .kpi strong { font-size: 14px; } #note { display: none; }
+      #tabs, #subtabs { overflow-x: auto; flex-wrap: nowrap; padding-left: 6px; padding-right: 6px; } #tabs button, #subtabs button { white-space: nowrap; padding: 8px 12px; }
+      #pcards { padding: 8px 8px 0; grid-template-columns: 1fr 1fr; } .pbox { margin: 8px 8px 0; } .pcard .big { font-size: 16px; } #cmpTable { font-size: 11px; }
+    }
     #note { padding: 3px 16px; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--line); }
   </style>
 </head>
@@ -38,9 +49,10 @@
     <h1>Trading-Bot <span class="pill" id="mode">PAPER</span></h1>
     <div class="kpi"><small>Paper-Konto (gemeinsam) · Eigenkapital · gesamt</small><strong id="equity">–</strong> <span id="pnl"></span></div>
     <div class="kpi" id="todayKpi" title="Eigenkapitaländerung seit Mitternacht (inkl. offener Positionen)"><small>Profit heute</small><strong id="today">–</strong> <span id="todayPct"></span></div>
-    <div class="kpi"><small>Bargeld</small><strong id="cash">–</strong></div>
-    <div class="kpi"><small>In Positionen gebunden</small><strong id="held">–</strong> <span class="muted" id="split"></span></div>
+    <div class="kpi hide-sm"><small>Bargeld</small><strong id="cash">–</strong></div>
+    <div class="kpi hide-sm"><small>In Positionen gebunden</small><strong id="held">–</strong> <span class="muted" id="split"></span></div>
     <div class="grow"></div>
+    <button class="btn" id="remoteBtn" title="Dieselbe Oberfläche auf dem Handy oder im Browser">📱 Handy</button>
     <button class="btn" id="startAll">Alle starten</button>
     <button class="btn" id="stopAll">Alle stoppen</button>
     <button class="btn danger" id="killAll">NOT-AUS (alle)</button>
@@ -64,6 +76,7 @@
     <div class="pbox"><b>Strategie-Rangliste (welche verdient wirklich?)</b><table id="pstrat"></table></div>
     <div class="muted" style="padding:4px 16px 16px;font-size:11px">Heute = seit Mitternacht (Ortszeit). Eigenkapitaländerung enthält offene Positionen und ist nach Gebühren; „realisiert“ zählt nur verkaufte Trades. Spielgeld in USD.</div>
   </div>
+  <div id="remoteModal" class="modal" hidden><div class="dlg" id="remoteBox"></div></div>
   <script src="__shell.js" type="module"></script>
 </body>
 </html>

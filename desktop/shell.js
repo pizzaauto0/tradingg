@@ -122,6 +122,40 @@ async function renderCompare() {
 $("cmpLogs").onclick = () => window.electronBridge?.openLogs();
 $("cmpReset").onclick = async () => { if (!confirm("Alle Schatten-Läufe auf frisches Paper-Geld zurücksetzen? Ihre Trades und Statistiken werden gelöscht (der Haupt-Modus bleibt unberührt).")) return; try { await call("resetShadows"); await renderCompare(); } catch (e) { alert(e.message); } };
 
+// ---- Handy-/Browser-Zugang (nur in der Desktop-App; am Handy selbst gibt es den Knopf nicht) ----
+const bridge = window.electronBridge;
+if (!bridge?.remoteGet) $("remoteBtn").hidden = true;
+async function openRemote() {
+  const modal = $("remoteModal"), box = $("remoteBox");
+  const draw = (s) => {
+    const parts = [el("h3", null, "📱 Handy / Browser")];
+    parts.push(el("p", "muted", "Dieselbe Oberfläche (alle Tabs, Dashboard, Einstellungen) auf dem Handy oder in einem anderen Browser. Der Bot läuft weiter auf diesem PC – er muss dafür an sein."));
+    const row1 = el("label", "fld chk"), cb = el("input"); cb.type = "checkbox"; cb.checked = s.enabled; row1.append(cb, document.createTextNode(" Zugriff erlauben (standardmäßig aus)"));
+    cb.onchange = async () => { if (cb.checked && !confirm("Zugriff vom Handy/Browser einschalten? Die App öffnet dazu einen Port im Heimnetz (Windows fragt evtl. nach der Firewall: „Private Netzwerke“ zulassen). Nur Personen mit dem Schlüssel-Link kommen hinein.")) { cb.checked = false; return; } draw(await bridge.remoteSet({ enabled: cb.checked })); };
+    parts.push(row1);
+    const sel = el("select"); for (const [v, l] of [["view", "Nur ansehen (empfohlen)"], ["control", "Steuern: kaufen, verkaufen, Stop/Ziel, Einstellungen"]]) { const o = el("option", null, l); o.value = v; sel.append(o); }
+    sel.value = s.mode; sel.onchange = async () => { if (sel.value === "control" && !confirm("„Steuern“ erlaubt jedem mit dem Link, Trades auszulösen, Bots zu stoppen und Einstellungen zu ändern. Wallet-Aktionen bleiben am PC gesperrt. Link geheim halten – trotzdem aktivieren?")) { sel.value = s.mode; return; } draw(await bridge.remoteSet({ mode: sel.value })); };
+    const l2 = el("label", "fld"); l2.append(document.createTextNode("Was darf das Handy? "), sel); parts.push(l2);
+    if (s.enabled && s.running) {
+      parts.push(el("div", "muted", `Läuft auf Port ${s.port}. Öffne am Handy (gleiches WLAN) einen dieser Links – am einfachsten den QR-Code scannen. Beim ersten Öffnen wird der Schlüssel im Browser gespeichert; danach reicht die Adresse ohne Schlüssel. „Zum Startbildschirm hinzufügen“ macht daraus eine App.`));
+      if (!s.urls.length) parts.push(el("div", "bad", "Keine Netzwerkadresse gefunden – ist der PC mit WLAN/LAN verbunden?"));
+      for (const u of s.urls) {
+        const box2 = el("div", "qr"); if (u.qr) { const img = el("img"); img.src = u.qr; img.width = 140; img.height = 140; img.alt = "QR-Code"; box2.append(img); }
+        const t = el("div"); t.append(el("b", null, `${u.name} (${u.ip})`), el("br"), el("code", null, u.url));
+        const cp = el("button", "btn", "Link kopieren"); cp.onclick = () => navigator.clipboard?.writeText(u.url).then(() => { cp.textContent = "Kopiert ✓"; }); t.append(el("br"), cp); box2.append(t); parts.push(box2);
+      }
+      parts.push(el("div", "muted", "Anderes WLAN / Mobilfunk: Dafür ist ein privates VPN nötig, z. B. Tailscale (auf PC und Handy installieren, anmelden; dann den Link mit der Tailscale-Adresse des PCs (100.x.x.x) verwenden). Im WLAN ist die Verbindung unverschlüsselt – nie im öffentlichen WLAN verwenden, und keinen Port am Router freigeben."));
+      const rg = el("button", "btn", "Neuen Schlüssel erzeugen (alte Links/Handys sind danach ausgesperrt)"); rg.onclick = async () => { if (confirm("Alle bisherigen Links und angemeldeten Handys werden ungültig. Fortfahren?")) draw(await bridge.remoteSet({ regenerate: true })); }; parts.push(rg);
+    }
+    const close = el("button", "btn primary", "Schließen"); close.onclick = () => { modal.hidden = true; }; const r = el("div", "btns"); r.append(close); parts.push(r);
+    box.replaceChildren(...parts);
+  };
+  draw(await bridge.remoteGet());
+  modal.hidden = false;
+}
+$("remoteBtn").onclick = () => openRemote().catch((e) => alert(e.message));
+$("remoteModal").onclick = (e) => { if (e.target === $("remoteModal")) $("remoteModal").hidden = true; };
+
 // ---- Profit-Tab ----
 const sg = (x, d = 2) => `${x >= 0 ? "+" : ""}${x.toFixed(d)}`;
 let pdata = null, prange = "7";

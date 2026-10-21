@@ -4,6 +4,7 @@ const { app, BrowserWindow, ipcMain, protocol, session, Tray, Menu, Notification
 const fs = require("fs");
 const path = require("path");
 const { Store } = require("./storage");
+const { createRemote, newKey, lanAddresses } = require("./remote");
 
 const EXT = app.isPackaged ? path.join(process.resourcesPath, "ext") : path.join(__dirname, "..", "extension");
 const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -58,22 +59,27 @@ function pruneLogs() {
   walk(root);
 }
 
+// Dateien der Oberfläche: gleiche Seiten für das App-Fenster (app://ext/…) und für Handy/Browser (http, remote = true; dort ersetzt remote-shim.js den chrome-shim)
+const typeOf = (p) => MIME[path.extname(p).toLowerCase()] || "application/octet-stream";
+function asset(rel, remote = false) {
+  const hit = (body, p) => ({ body, type: typeOf(p) });
+  if (rel === "__shim.js") return hit(fs.readFileSync(path.join(__dirname, remote ? "remote-shim.js" : "chrome-shim.js")), "x.js");
+  if (rel === "__shell.js") return hit(fs.readFileSync(path.join(__dirname, "shell.js")), "x.js");
+  if (rel === "__shell.html") return hit(injectShim(fs.readFileSync(path.join(__dirname, "shell.html"), "utf8")), "x.html");
+  if (rel === "manifest.webmanifest") return { body: JSON.stringify({ name: "Trading-Bot", short_name: "Trading-Bot", start_url: "/", display: "standalone", background_color: "#15181d", theme_color: "#15181d", icons: [{ src: "/icon.png", sizes: "128x128", type: "image/png" }] }), type: "application/manifest+json" };
+  if (rel === "icon.png") return hit(fs.readFileSync(path.join(__dirname, "icon.png")), "x.png");
+  if (rel === "__background.html" && !remote) return hit(BACKGROUND_HTML, "x.html");
+  const file = path.normalize(path.join(EXT, rel));
+  if (!file.startsWith(EXT + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) return null;
+  return hit(path.extname(file) === ".html" ? injectShim(fs.readFileSync(file, "utf8")) : fs.readFileSync(file), file);   // Shim vor allen anderen Skripten einsetzen
+}
+
 function serve(request) {
   const u = new URL(request.url);
   const rel = decodeURIComponent(u.pathname).replace(/^\/+/, "");
   if (u.host !== "ext") return new Response("nicht gefunden", { status: 404 });
-  const type = (p) => MIME[path.extname(p).toLowerCase()] || "application/octet-stream";
-  const send = (body, p) => new Response(body, { headers: { "Content-Type": type(p), "Cache-Control": "no-store" } });
-  if (rel === "__shim.js") return send(fs.readFileSync(path.join(__dirname, "chrome-shim.js")), "x.js");
-  if (rel === "__shell.js") return send(fs.readFileSync(path.join(__dirname, "shell.js")), "x.js");
-  if (rel === "__shell.html") return send(injectShim(fs.readFileSync(path.join(__dirname, "shell.html"), "utf8")), "x.html");
-  if (rel === "__background.html") return send(BACKGROUND_HTML, "x.html");
-  const file = path.normalize(path.join(EXT, rel));
-  if (!file.startsWith(EXT + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) return new Response("nicht gefunden", { status: 404 });
-  if (path.extname(file) === ".html") {   // Shim vor allen anderen Skripten einsetzen
-    return send(injectShim(fs.readFileSync(file, "utf8")), file);
-  }
-  return send(fs.readFileSync(file), file);
+  const a = asset(rel);
+  return a ? new Response(a.body, { headers: { "Content-Type": a.type, "Cache-Control": "no-store" } }) : new Response("nicht gefunden", { status: 404 });
 }
 
 const webPrefs = () => ({
@@ -112,6 +118,42 @@ function startBackground() {
   bg.loadURL(process.env.TB_BREAK ? "app://ext/nope.html" : "app://ext/__background.html").catch((e) => console.error("Hintergrunddienst loadURL:", e.message));
 }
 
+// Nachricht an den Hintergrunddienst (App-Fenster und Handy/Browser-Zugang benutzen denselben Weg)
+async function rtSend(msg) {
+  await bgReady;
+  return new Promise((resolve) => {
+    const id = nextId++;
+    const timer = setTimeout(() => { pending.delete(id); resolve({ ok: false, error: "Der Hintergrunddienst antwortet nicht (Zeitüberschreitung). Menü Ansicht → Entwicklerwerkzeuge zeigt den Fehler; Protokoll: app.log im Datenordner." }); }, SLOW.has(msg?.type) ? 300000 : 20000);
+    pending.set(id, (r) => { clearTimeout(timer); resolve(r); });
+    bg.webContents.send("rt:message", id, msg);
+  });
+}
+
+// ---- Handy-/Browser-Zugang (standardmäßig aus; siehe remote.js) ----
+const remote = createRemote({ getFile: async (rel) => asset(rel, true), sendToBg: rtSend });
+const remoteFile = () => path.join(app.getPath("userData"), "remote.json");
+function remoteCfg() {
+  let c = {};
+  try { c = JSON.parse(fs.readFileSync(remoteFile(), "utf8")); } catch { /* erster Start */ }
+  return { enabled: false, mode: "view", port: 8787, key: newKey(), ...c };
+}
+function saveRemoteCfg(c) { fs.writeFileSync(remoteFile(), JSON.stringify(c), { mode: 0o600 }); }
+async function applyRemote() {
+  const c = remoteCfg();
+  if (!c.enabled) { await remote.stop(); return; }
+  if (remote.running()) { remote.setMode(c.mode); if (c.key !== remoteKeyInUse) await remote.start({ key: c.key, mode: c.mode, port: c.port }); }
+  else await remote.start({ key: c.key, mode: c.mode, port: c.port });
+  remoteKeyInUse = c.key;
+}
+let remoteKeyInUse = null;
+async function remoteState() {
+  const c = remoteCfg(), running = remote.running(), port = remote.port();
+  let QR = null; try { QR = require("qrcode"); } catch { /* ohne QR-Bibliothek: nur Links */ }
+  const urls = [];
+  if (running) for (const a of lanAddresses()) { const url = `http://${a.ip}:${port}/?key=${c.key}`; urls.push({ name: a.name, ip: a.ip, url, qr: QR ? await QR.toDataURL(url, { margin: 1, width: 200 }) : null }); }
+  return { enabled: c.enabled, mode: c.mode, running, port, urls };
+}
+
 function setupIpc() {
   ipcMain.handle("storage", (_e, op, area, arg) => {
     if (op === "get") return store.get(area, arg);
@@ -120,14 +162,16 @@ function setupIpc() {
     if (op === "clear") return store.clear(area);
     throw new Error("Unbekannte Speicher-Operation");
   });
-  ipcMain.handle("rt:send", async (_e, msg) => {
-    await bgReady;
-    return new Promise((resolve) => {
-      const id = nextId++;
-      const timer = setTimeout(() => { pending.delete(id); resolve({ ok: false, error: "Der Hintergrunddienst antwortet nicht (Zeitüberschreitung). Menü Ansicht → Entwicklerwerkzeuge zeigt den Fehler; Protokoll: app.log im Datenordner." }); }, SLOW.has(msg?.type) ? 300000 : 20000);
-      pending.set(id, (r) => { clearTimeout(timer); resolve(r); });
-      bg.webContents.send("rt:message", id, msg);
-    });
+  ipcMain.handle("rt:send", (_e, msg) => rtSend(msg));
+  ipcMain.handle("remote:get", () => remoteState());
+  ipcMain.handle("remote:set", async (_e, o) => {
+    const c = remoteCfg();
+    if (o.mode === "view" || o.mode === "control") c.mode = o.mode;
+    if (o.regenerate) c.key = newKey();
+    if (typeof o.enabled === "boolean") c.enabled = o.enabled;
+    saveRemoteCfg(c);
+    await applyRemote();
+    return remoteState();
   });
   ipcMain.handle("diag", () => ({
     version: app.getVersion(), packaged: app.isPackaged, ext: EXT, extExists: fs.existsSync(EXT), userData: app.getPath("userData"), platform: process.platform + " " + process.arch,
@@ -180,10 +224,11 @@ else {
     pruneLogs();
     Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: "editMenu" }, { role: "viewMenu" }]));
     setupIpc();
+    applyRemote().catch((e) => note("Handy-Zugang", e.message));
     startBackground();
     setupTray();
     openPage("main", { show: !process.argv.includes("--background") });
   });
-  app.on("before-quit", () => { quitting = true; store?.flush(); });
+  app.on("before-quit", () => { quitting = true; store?.flush(); remote.stop(); });
   app.on("window-all-closed", () => {});   // läuft über das Tray-Symbol weiter
 }

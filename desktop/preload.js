@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld("electronBridge", {
   onMessage: (cb) => ipcRenderer.on("rt:message", (_e, id, msg) => cb(msg, (resp) => ipcRenderer.send("rt:reply", id, resp))),
   writeLog: (rel, text) => ipcRenderer.invoke("log:write", rel, text),
   openLogs: () => ipcRenderer.invoke("log:open"),
+  remoteGet: () => ipcRenderer.invoke("remote:get"),
+  remoteSet: (o) => ipcRenderer.invoke("remote:set", o),
   tip: (text) => ipcRenderer.send("tip", String(text).slice(0, 120)),
   diag: () => ipcRenderer.invoke("diag"),
   notify: (opts) => ipcRenderer.send("notify", opts),

@@ -24,6 +24,15 @@ gibt es die MetaTrader-App in `../mt5bot`). Nur Kauf (Long), **ohne Hebel**: bei
 Positionsgröße (33 % des Kapitals) das Risiko meist weit unter 1 % – Gewinne und Verluste bleiben klein. USD/EUR ist der Kehrwert von EUR/USD und
 rechnet das Spielgeld 1:1 (Näherung). Yahoo-Daten: Innertageskerzen reichen nur ~60 Tage (5/15/30 Min.) bzw. ~2 Jahre (1 Std.) zurück.
 
+## Handy / Browser: dieselbe Oberfläche (📱 Handy)
+Knopf **📱 Handy** oben in der App: Die App liefert dieselben Seiten (alle Tabs, Dashboard, Einstellungen, Profit, Vergleich) über einen kleinen Webserver aus. Bot, Strategien und Konto bleiben auf dem PC (der muss an sein und die App laufen).
+1. **Zugriff erlauben** anhaken (standardmäßig aus). Windows fragt einmal nach der Firewall: „Private Netzwerke“ zulassen.
+2. Modus wählen: **Nur ansehen** (empfohlen) oder **Steuern** (kaufen, verkaufen, Stop/Ziel, Einstellungen, Not-Aus).
+3. Am Handy (gleiches WLAN) den **QR-Code scannen** bzw. den Link öffnen. Der Schlüssel wird im Browser gespeichert; „Zum Startbildschirm hinzufügen“ macht daraus eine App.
+
+Sicherheit: nur mit langem zufälligem Schlüssel (Cookie, SameSite=Strict); falsche Schlüssel werden nach 10 Versuchen 10 Minuten gesperrt; „Neuen Schlüssel erzeugen“ sperrt alle bisherigen Handys aus. **Wallet-Aktionen** (anlegen, entsperren, Schlüssel anzeigen, löschen) gehen nie über diesen Zugang. Im WLAN ist die Verbindung **unverschlüsselt** (nicht im öffentlichen WLAN verwenden, keinen Router-Port freigeben).
+**Anderes WLAN / Mobilfunk:** privates VPN **Tailscale** auf PC und Handy installieren, anmelden und den Link mit der Tailscale-Adresse des PCs (100.x.x.x) öffnen – ohne Portfreigabe und verschlüsselt. Alternativ bleibt Discord (Knöpfe) für Kurzabfragen von überall.
+
 ## Mehrere Modi gleichzeitig (Vergleich)
 Pro Bot (Währungen, Silber & Gold, Krypto) gibt es 5 Modi: **Streng, Erkunden, Playbook, Trefferquote, Final-3**. Der **Haupt-Modus (★, einstellbar im Tab „Strategien“)** handelt wie bisher mit dem gemeinsamen Paper-Konto.
 Die **anderen vier laufen als Schatten-Läufe im Hintergrund** mit **eigenem Paper-Geld** (gleiches Startkapital, gleiche Märkte, Gebühren und Regeln – nur die Strategie-Auswahl unterscheidet sich; Final-3 rechnet auf Tageskerzen). Sie melden nichts an Discord/Telegram.
