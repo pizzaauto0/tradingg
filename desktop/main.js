@@ -11,6 +11,7 @@ const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; cha
   ".png": "image/png", ".json": "application/json", ".svg": "image/svg+xml" };
 const PAGES = {
   main: { url: "app://ext/__shell.html", width: 1100, height: 860, title: "Trading-Bot" },
+  alldash: { url: "app://ext/__alldash.html", width: 1320, height: 900, title: "Trading-Bot – Dashboard (alle)" },
   dashboard: { url: "app://ext/dashboard.html", width: 1240, height: 860, title: "Trading-Bot – Dashboard" },
   options: { url: "app://ext/options.html", width: 960, height: 860, title: "Trading-Bot – Einstellungen" },
 };
@@ -64,6 +65,8 @@ const typeOf = (p) => MIME[path.extname(p).toLowerCase()] || "application/octet-
 function asset(rel, remote = false) {
   const hit = (body, p) => ({ body, type: typeOf(p) });
   if (rel === "__shim.js") return hit(fs.readFileSync(path.join(__dirname, remote ? "remote-shim.js" : "chrome-shim.js")), "x.js");
+  if (rel === "__alldash.js") return hit(fs.readFileSync(path.join(__dirname, "alldash.js")), "x.js");
+  if (rel === "__alldash.html") return hit(injectShim(fs.readFileSync(path.join(__dirname, "alldash.html"), "utf8")), "x.html");
   if (rel === "__shell.js") return hit(fs.readFileSync(path.join(__dirname, "shell.js")), "x.js");
   if (rel === "__shell.html") return hit(injectShim(fs.readFileSync(path.join(__dirname, "shell.html"), "utf8")), "x.html");
   if (rel === "manifest.webmanifest") return { body: JSON.stringify({ name: "Trading-Bot", short_name: "Trading-Bot", start_url: "/", display: "standalone", background_color: "#15181d", theme_color: "#15181d", icons: [{ src: "/icon.png", sizes: "128x128", type: "image/png" }] }), type: "application/manifest+json" };

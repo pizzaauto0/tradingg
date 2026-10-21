@@ -327,6 +327,24 @@ export async function getProfit(now = new Date()) {
     bots: byBot(trades, nowMs, BOT_IDS), labels: Object.fromEntries(BOT_IDS.map((id) => [id, BOTS[id].label])), curve: sampleCurve(log, 300), now: now.toISOString() };
 }
 
+// Gesamtübersicht für das Dashboard „Alle“: die drei Bots mit ihrem HAUPT-Modus (keine Schatten-Läufe) zusammengefasst
+export async function getOverview(now = new Date()) {
+  const P = await getProfit(now), acc = await getAccount(), bots = [];
+  for (const id of BOT_IDS) {
+    const cfg = await loadConfig(id), st = await loadState(cfg, id);
+    const positions = Object.values(st.positions).map((p) => ({ ...p, price: st.activity?.[p.symbol]?.price ?? p.entryPrice }));
+    const markets = cfg.assets.map(symbolOf).map((symbol) => {
+      const a = st.activity?.[symbol] || {};
+      return { symbol, price: a.price ?? null, regime: a.regime ?? null, strategy: a.strategy ?? null, signal: a.signal ?? null, error: a.error ?? null, open: !!st.positions[symbol] };
+    });
+    bots.push({ id, label: BOTS[id].label, mode: cfg.backtest.profile, modeLabel: MODE_LABEL[cfg.backtest.profile], enabled: st.enabled, timeframe: cfg.timeframe, live: !!cfg.liveTrading, positions, markets,
+      activeStrategies: st.approved.filter((a) => a.active !== false).length, approved: st.approved.length, lastTick: st.lastTick || null, lastError: st.lastError || null, halted: !!st.risk?.halted,
+      paused: !!st.pauseUntil && Date.parse(st.pauseUntil) > now.getTime(), realizedToday: P.bots[id].today.realized, realizedTotal: P.bots[id].total.realized });
+  }
+  const trades = (await getLocal("trades", [])).filter((t) => t.action === "ENTRY" || t.action === "EXIT").slice(-40).reverse();
+  return { account: acc, periods: P.periods, curve: P.curve, capital: P.capital, breaker: P.breaker, bots, trades, now: now.toISOString() };
+}
+
 // ---- Live-Statistik für Discord ---------------------------------------------------------------------------------------
 export async function getLiveStats() {
   const account = await getAccount(), bots = [];
@@ -527,6 +545,7 @@ async function handleInner(msg, fetchFn = fetch) {
     case "getAccount": return { ...(await getAccount()), today: (await getProfit()).periods.today };
     case "getProfit": return getProfit();
     case "getModes": return getModes();
+    case "getOverview": return getOverview();
     case "getModeDetail": return getModeDetail(botId, MODE_IDS.includes(msg.mode) ? msg.mode : cfg.backtest.profile);
     case "resetShadows": {   // Schatten-Läufe auf Anfang (frisches Paper-Geld, keine Trades) – für einen sauberen Neustart des Vergleichs
       for (const id of BOT_IDS) for (const m of MODE_IDS) { const k = shadowKeys(id, m); for (const key of Object.values(k)) await removeLocal(key); }

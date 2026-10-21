@@ -20,7 +20,7 @@ async function login(port, key) {
 }
 
 test("Nachrichten-Erlaubnis: Ansehen, Steuern, Wallet nie", () => {
-  assert.ok(allowed("view", "getStatus") && allowed("view", "getModes") && allowed("view", "exportTrades"));
+  assert.ok(allowed("view", "getStatus") && allowed("view", "getModes") && allowed("view", "getOverview") && allowed("view", "exportTrades"));
   assert.ok(!allowed("view", "buy") && !allowed("view", "saveConfig") && !allowed("view", "killAll"));
   assert.ok(allowed("control", "buy") && allowed("control", "killAll") && allowed("control", "saveConfig"));
   for (const t of ["createWallet", "importWallet", "unlock", "lock", "exportKey", "deleteWallet", "balances"]) assert.ok(!allowed("control", t) && !allowed("view", t), t);

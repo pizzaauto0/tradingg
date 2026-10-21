@@ -9,7 +9,7 @@ const crypto = require("crypto");
 const os = require("os");
 
 const NEVER = new Set(["createWallet", "importWallet", "unlock", "lock", "exportKey", "deleteWallet", "balances"]);
-const READ = new Set(["getStatus", "getAccount", "getProfit", "getModes", "getModeDetail", "getLiveStats", "chart", "getConfig", "discordStatus", "exportTrades"]);
+const READ = new Set(["getStatus", "getAccount", "getProfit", "getModes", "getOverview", "getModeDetail", "getLiveStats", "chart", "getConfig", "discordStatus", "exportTrades"]);
 const MAX_BODY = 64 * 1024;
 
 const allowed = (mode, type) => typeof type === "string" && !NEVER.has(type) && (mode === "control" || READ.has(type));

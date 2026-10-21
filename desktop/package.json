@@ -23,6 +23,8 @@
       "chrome-shim.js",
       "remote.js",
       "remote-shim.js",
+      "alldash.html",
+      "alldash.js",
       "storage.js",
       "shell.html",
       "shell.js",

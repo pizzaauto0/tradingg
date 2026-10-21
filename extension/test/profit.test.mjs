@@ -61,3 +61,15 @@ test("Controller: getProfit liefert Kennzahlen, Verlauf wird bei jedem Durchlauf
   p = await handle({ type: "getProfit" });
   assert.deepEqual(Object.keys(p.periods), ["today", "week", "month", "total"]); assert.deepEqual(Object.keys(p.bots), ["fx", "metals", "crypto"]);
 });
+
+test("Dashboard „Alle“: getOverview fasst die drei Haupt-Modi zusammen (Positionen, Märkte, Trades, Gewinn)", async () => {
+  installFakeChrome();
+  await handle({ type: "saveConfig", patch: { assets: ["SOL"], capital: { start: 500 } } });
+  await handle({ type: "saveConfig", bot: "fx", patch: { assets: ["EURUSD"], backtest: { profile: "playbook" } } });
+  const o = await handle({ type: "getOverview" });
+  assert.deepEqual(o.bots.map((b) => b.id), ["fx", "metals", "crypto"]);
+  assert.equal(o.bots.find((b) => b.id === "fx").mode, "playbook"); assert.equal(o.bots.find((b) => b.id === "crypto").mode, "strict");
+  assert.deepEqual(o.bots.find((b) => b.id === "fx").markets.map((m) => m.symbol), ["EUR/USD"]);
+  assert.equal(o.account.capital, 500); assert.ok(o.periods.today && o.periods.total && Array.isArray(o.curve)); assert.deepEqual(o.trades, []);
+  assert.equal(o.bots.every((b) => b.positions.length === 0 && b.enabled === false), true);
+});

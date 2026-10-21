@@ -24,6 +24,11 @@ gibt es die MetaTrader-App in `../mt5bot`). Nur Kauf (Long), **ohne Hebel**: bei
 Positionsgröße (33 % des Kapitals) das Risiko meist weit unter 1 % – Gewinne und Verluste bleiben klein. USD/EUR ist der Kehrwert von EUR/USD und
 rechnet das Spielgeld 1:1 (Näherung). Yahoo-Daten: Innertageskerzen reichen nur ~60 Tage (5/15/30 Min.) bzw. ~2 Jahre (1 Std.) zurück.
 
+## Dashboard „Alle“ (📊 Dashboard)
+Der Knopf **📊 Dashboard** oben (neben 📱 Handy) öffnet ein eigenes Fenster (am Handy: neuer Tab) mit den **drei Bots zusammen – jeweils mit ihrem Haupt-Modus** (die Schatten-Läufe sind nicht dabei). Tabs: **📊 Alle**, **Währungen**, **Silber & Gold**, **Krypto**.
+- **Alle:** Eigenkapital, Heute / 7 Tage / Insgesamt, eine Karte je Bot (Haupt-Modus, läuft/gestoppt, Kaufpause, offene Positionen, Gewinn), alle **offenen Positionen** zusammen (mit „Verkaufen“), alle **Märkte** mit Kurs, Marktphase, gewählter Strategie und Signal, die **letzten Käufe und Verkäufe** aller Bots und der gemeinsame Eigenkapital-Verlauf.
+- **Währungen / Silber & Gold / Krypto:** das ausführliche Dashboard dieses Bots mit Chart (Zoom), Handeln, Stop/Ziel und KI-Trailing.
+
 ## Handy / Browser: dieselbe Oberfläche (📱 Handy)
 Knopf **📱 Handy** oben in der App: Die App liefert dieselben Seiten (alle Tabs, Dashboard, Einstellungen, Profit, Vergleich) über einen kleinen Webserver aus. Bot, Strategien und Konto bleiben auf dem PC (der muss an sein und die App laufen).
 1. **Zugriff erlauben** anhaken (standardmäßig aus). Windows fragt einmal nach der Firewall: „Private Netzwerke“ zulassen.

@@ -153,6 +153,7 @@ async function openRemote() {
   draw(await bridge.remoteGet());
   modal.hidden = false;
 }
+$("allDashBtn").onclick = () => { if (bridge?.open) bridge.open("alldash", ""); else window.open("__alldash.html", "_blank"); };   // App: eigenes Fenster; Handy/Browser: neuer Tab
 $("remoteBtn").onclick = () => openRemote().catch((e) => alert(e.message));
 $("remoteModal").onclick = (e) => { if (e.target === $("remoteModal")) $("remoteModal").hidden = true; };
 
