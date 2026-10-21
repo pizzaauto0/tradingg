@@ -107,3 +107,15 @@ test("Tagesbericht: einmal pro Tag an den Discord-Webhook; getProfit liefert Ken
   const x = await handle({ type: "exportTrades" });
   assert.equal(x.count, 3); assert.ok(x.csv.startsWith("﻿"));
 });
+
+test("Countdown „nächste Kerzenprüfung“ liegt nie weiter als eine Kerzenlänge entfernt (auch bei verspäteten Daten)", async () => {
+  const { world, f } = await setup({});
+  await handle({ type: "start" }, f); await whenIdle();
+  const last = world.dfs["SOL/USD"].t.at(-1);
+  for (const lag of [5_000, 600_000, 3_000_000]) {          // Kerze kommt 5 s, 10 min oder 50 min nach Schluss an
+    const now = new Date(last + TF_MS + lag);
+    await runTick({ fetchFn: f, now });
+    const next = (await getStatus()).state.activity["SOL/USD"].nextCandleAt;
+    assert.ok(next > now.getTime() && next <= now.getTime() + TF_MS, `lag ${lag}: ${(next - now.getTime()) / 60000} min`);
+  }
+});

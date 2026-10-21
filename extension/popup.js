@@ -62,7 +62,7 @@ function activityCard() {
     : failing ? `Durchlauf fehlgeschlagen: ${state.lastError}`
     : secs == null ? "Wartet auf den ersten Durchlauf (alle 30 s) …" : alive ? "Bot arbeitet" : "Kein Lebenszeichen – ist der Browser aktiv?";
   const lines = [h("div", { class: "headline" }, dot, headline)];
-  if (state.enabled && secs != null) lines.push(row("Letzte Prüfung", `vor ${Math.round(secs)} s`));
+  if (state.enabled && secs != null) lines.push(row("Letzte Prüfung", `vor ${Math.max(0, Math.round(secs))} s`));
   const syms = Object.keys(state.activity);
   if (syms.length) {
     lines.push(h("table", {}, h("thead", {}, h("tr", {}, ...["Markt", "Kurs", "Phase", "Strategie", "Signal"].map((t) => h("th", {}, t)))),

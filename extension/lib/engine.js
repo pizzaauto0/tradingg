@@ -67,6 +67,7 @@ export class Engine {
         const prev = state.lastCandle[sym];
         data[sym] = { live, closed, stamp, isNew: prev != null && prev !== stamp };
         if (prev == null) state.lastCandle[sym] = stamp; // beim ersten Sehen nicht auf alte Signale reagieren
+        if (prev == null || prev !== stamp) (state.seenAt ||= {})[sym] = now.toISOString();   // wann die Kerze bei uns ankam (Datenquellen liefern oft einige Minuten verspätet)
         this.lastPrices[sym] = last(live.close);
       } catch (e) {
         state.activity[sym] = { ts: now.toISOString(), error: e.message };
@@ -347,6 +348,14 @@ export class Engine {
     }
   }
 
+  // Wann kommt voraussichtlich die nächste geschlossene Kerze? Nach dem tatsächlichen Takt (Ankunft der letzten Kerze + Kerzenlänge), nie später als eine Kerzenlänge ab jetzt
+  nextCheck(sym, stamp, tfMs, now) {
+    const seen = this.state.seenAt?.[sym], byGrid = stamp + 2 * tfMs;
+    let next = seen ? Date.parse(seen) + tfMs : byGrid;
+    while (next <= now.getTime()) next += tfMs;   // Kerze überfällig (Datenverzug): nächste Kerzengrenze danach
+    return Math.min(next, now.getTime() + tfMs);
+  }
+
   // ---- Sichtbarkeit: was der Bot gerade sieht und entscheidet (für die Anzeige im Popup) ----
   observe(sym, { closed, live, isNew, stamp }, now, tfMs) {
     let market = null, sel = null, signal = null, note = "", checks = [];
@@ -365,7 +374,7 @@ export class Engine {
     } catch (e) { note = e.message; }
     this.state.activity[sym] = {
       ts: now.toISOString(), price: last(live.close), regime: market?.regime ?? null, volatility: market?.volatility ?? null,
-      adx: market?.adx ?? null, strategy: sel?.strategy.name ?? null, signal, nextCandleAt: stamp + 2 * tfMs, note, checks,
+      adx: market?.adx ?? null, strategy: sel?.strategy.name ?? null, signal, nextCandleAt: this.nextCheck(sym, stamp, tfMs, now), note, checks,
     };
     if (isNew) {
       const what = !market ? `Analyse nicht möglich (${note})`
