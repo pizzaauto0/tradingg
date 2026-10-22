@@ -140,6 +140,9 @@ SmartScreen warnt bei unsignierten Programmen: *Weitere Informationen → Trotzd
   **Nicht geprüft:** Windows-Build, Tray/Autostart unter Windows, echte Börsen- und Yahoo-Verbindungen (in der Entwicklungsumgebung gesperrt – ob Yahoo die Anfragen der App annimmt, zeigt sich erst bei dir).
 - Die Chrome-Erweiterung selbst bleibt ein einzelner (Krypto-)Bot; die drei Tabs gibt es nur in der Desktop-App. Die MetaTrader-Variante ist die Python-App in `../mt5bot` (siehe `mt5bot/APP.md`).
 
+## Bisherige Trades (Dashboard)
+Im Dashboard jedes Bots gibt es oben die Reiter **📈 Live** und **🧾 Bisherige Trades**: links die abgeschlossenen Trades (grün/rot), rechts der Chart des gewählten Trades mit Einstieg ▲, Ausstieg ▼ und dem Verlauf von **Stop-Loss** (rot) und **Ziel** (grün) – jede Verschiebung als Stufe mit Punkt. Auf der Startseite jedes Bots unten steht „<Bot>-Trades“ mit den letzten fünf; ein Klick öffnet den Trade mit Chart. Kerzen werden geladen, solange die Datenquelle sie noch liefert; ältere Trades zeigen die Linien ohne Kerzen. Trades von vor diesem Update haben nur Einstieg und Ausstieg (ohne Stop/Ziel-Verlauf).
+
 ## Schutz vor Kauf-und-sofort-Verkauf (aus der Log-Analyse)
 - **Mindest-Haltedauer** (Einstellung „Mindest-Haltedauer vor Ausstiegssignal“, Standard 3 Kerzen): Ausstiegssignale der Strategie gelten erst danach. Stop-Loss, Take-Profit und Trailing gelten immer.
 - **Strategie-Sperre** (Standard: 2 Verluste in Folge → 24 h): Dieselbe Strategie auf demselben Markt kauft dann nicht mehr; alle anderen laufen weiter. Meldung „SPERRE …“ in Discord. Manuelle Trades zählen nicht.

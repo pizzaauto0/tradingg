@@ -14,6 +14,7 @@ import { decorate, flushLogs, queueLog, sendDiscord } from "./discord.js";
 import { DiscordBot, postPanel } from "./discordbot.js";
 import { buildStatsEmbed } from "./stats.js";
 import { MODE_IDS, MODE_LABEL, logText, shadowCfg, shadowKeys, shadowModes, summarizeMode } from "./compare.js";
+import { pairTrades } from "./history.js";
 import { appendEquity, byBot, equityAt, byStrategy, performance, periodStats, realized, sampleCurve, tradesToCsv } from "./profit.js";
 
 let current = null; // laufender Durchlauf (Promise) – es läuft nie mehr als einer gleichzeitig
@@ -608,6 +609,17 @@ async function handleInner(msg, fetchFn = fetch) {
       await setLocal(stateKey(cfg, botId), state);
       await saveAccount(account);
       return sym;
+    }
+    case "tradeHistory": {   // abgeschlossene Trades dieses Bots (Kauf+Verkauf zusammengefasst, mit Stop-/Ziel-Verlauf)
+      const all = (await getLocal("trades", [])).filter(ownRow(botId));
+      return { trades: pairTrades(all), timeframe: cfg.timeframe };
+    }
+    case "tradeCandles": {   // Kerzen rund um einen Trade (soweit die Datenquelle sie noch liefert)
+      const df = await fetchRecent(cfg, msg.symbol, fetchFn), tfMs = timeframeSeconds(cfg.timeframe) * 1000, pad = 25;
+      const a = Date.parse(msg.from) - pad * tfMs, b = Date.parse(msg.to) + pad * tfMs, idx = df.t.map((t, i) => i).filter((i) => df.t[i] >= a && df.t[i] <= b);
+      if (!idx.length || df.t[0] > Date.parse(msg.from)) return { t: [], open: [], high: [], low: [], close: [], tfMs };
+      const cut = (arr) => idx.map((i) => arr[i]);
+      return { t: cut(df.t), open: cut(df.open), high: cut(df.high), low: cut(df.low), close: cut(df.close), tfMs };
     }
     case "chart": { // Daten für das Dashboard: Kerzen, Durchschnitte, Position, Aktivität
       const st = await loadState(cfg, botId);

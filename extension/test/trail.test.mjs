@@ -90,6 +90,9 @@ test("Trailing im Betrieb: Stop wandert nach oben, alte Tiefs lösen ihn nicht a
   assert.equal(Object.keys(s.state.positions).length, 0);
   const exit = s.trades.find((t) => t.action === "EXIT");
   assert.ok(exit.pnl > 0, `Ausstieg im Plus: ${exit.pnl}`); assert.match(exit.reason, /Stop-Loss/);
+  assert.ok(exit.adj.length >= 1 && exit.initStop > 0 && exit.entryTs, "Verlauf im Verkauf gespeichert");
+  const hist = await handle({ type: "tradeHistory" }, f);
+  assert.equal(hist.trades.length, 1); assert.ok(hist.trades[0].adj.length >= 1);
 });
 
 test("Dashboard: manuell kaufen, Stop/Ziel/Trailing ändern, verkaufen – mit harten Grenzen", async () => {

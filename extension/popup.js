@@ -156,6 +156,7 @@ function renderStatus() {
   ));
   if (status.events.length) out.push(h("details", { class: "card fold", ontoggle: (e) => { e.target.open ? openSections.add("events") : openSections.delete("events"); }, ...(openSections.has("events") ? { open: true } : {}) },
     h("summary", {}, "Letzte Ereignisse"), ...status.events.slice(0, 6).map((e) => h("div", { class: "ev" }, h("span", { class: "muted" }, stamp(e.ts) + " "), e.text.split("\n")[0]))));
+  out.push(recentTradesCard());
   return out;
 }
 
@@ -232,13 +233,26 @@ function renderStrategies() {
 }
 
 // ---------------------------------------------------------------- Trades
+// Unten auf der Startseite: die letzten abgeschlossenen Trades dieses Bots, Klick öffnet den Trade mit Chart im Dashboard
+function recentTradesCard() {
+  const sells = status.trades.filter((t) => t.action === "EXIT").slice(0, 5), open = (q = "") => chrome.tabs.create({ url: chrome.runtime.getURL(`dashboard.html?bot=${BOT}&tab=trades${q}`) });
+  return card(`${BOTS[BOT].label}-Trades`, ...(sells.length ? sells.map((t) => { const up = (t.pnl ?? 0) >= 0;
+    return h("div", { class: `trow2 ${up ? "up" : "down"}`, onclick: () => open(`&trade=${encodeURIComponent(`${t.symbol}@${t.ts}`)}`) },
+      h("span", {}, `${up ? "🟢" : "🔴"} ${t.symbol}`), h("span", { class: "muted" }, `${strategyLabel(t.strategy)} · ${since(t.ts)}`), h("span", { class: up ? "ok" : "bad" }, `${up ? "+" : ""}${fmt(t.pnl)} USD`)); })
+    : [h("span", { class: "muted" }, "Noch kein abgeschlossener Trade.")]),
+    h("div", { class: "btns" }, btn("🧾 Bisherige Trades ansehen", () => open())));
+}
 function renderTrades() {
-  if (!status.trades.length) return [h("p", { class: "muted" }, "Noch keine Trades.")];
-  return status.trades.map((t) => h("div", { class: "card" },
-    row(`${t.action} ${(t.symbol || "").split("/")[0]} · ${t.mode}`, new Date(t.ts).toLocaleString()),
-    row("Preis / Menge", `${fmt(t.price)} / ${fmt(t.amount, 4)}`),
-    t.pnl != null && row("Ergebnis (netto)", `${t.pnl >= 0 ? "+" : ""}${fmt(t.pnl)} USD`, t.pnl >= 0 ? "ok" : "bad"),
-    h("div", { class: "muted" }, t.reason)));
+  const rows = status.trades.filter((t) => t.action === "ENTRY" || t.action === "EXIT");
+  const open = (q = "") => chrome.tabs.create({ url: chrome.runtime.getURL(`dashboard.html?bot=${BOT}&tab=trades${q}`) });
+  const head = h("div", { class: "btns" }, btn("🧾 Bisherige Trades im Dashboard (mit Chart)", () => open()));
+  if (!rows.length) return [head, h("p", { class: "muted" }, "Noch keine Trades.")];
+  return [head, ...rows.map((t) => {
+    const buy = t.action === "ENTRY", up = (t.pnl ?? 0) >= 0;
+    return h("div", { class: `card trow ${buy ? "" : up ? "up" : "down"}`, onclick: () => open(buy ? "" : `&trade=${encodeURIComponent(`${t.symbol}@${t.ts}`)}`) },
+      h("div", { class: "ptop" }, h("strong", {}, `${buy ? "🟢 Kauf" : up ? "✅ Verkauf" : "🔴 Verkauf"} ${t.symbol}`), t.pnl != null && h("span", { class: up ? "ok" : "bad" }, `${up ? "+" : ""}${fmt(t.pnl)} USD`)),
+      h("div", { class: "psub muted" }, `${strategyLabel(t.strategy)} · ${fmt(t.price)} · ${stamp(t.ts)}`));
+  })];
 }
 
 // ---------------------------------------------------------------- Wallet

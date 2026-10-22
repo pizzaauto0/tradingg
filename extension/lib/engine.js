@@ -303,7 +303,9 @@ export class Engine {
     this.exitedThisTick.add(pos.symbol); // kein Wiedereinstieg im selben Durchlauf
     await this.save();
     await this.logTrade({ ts: now.toISOString(), mode: this.broker.mode, symbol: pos.symbol, action: "EXIT", price: fill.price,
-      amount: fill.amount, fee: fill.fee, pnl, strategy: pos.strategyName, regime: pos.regime, reason, equity: await this.equity() });
+      amount: fill.amount, fee: fill.fee, pnl, strategy: pos.strategyName, regime: pos.regime, reason, equity: await this.equity(),
+      entryTs: pos.openedAt, entryPrice: pos.entryPrice, initStop: pos.initialStop, initTp: (pos.history || []).find((e) => e.kind === "tp")?.from ?? pos.takeProfit, stop: pos.stop, takeProfit: pos.takeProfit,
+      adj: (pos.history || []).map((e) => ({ ts: e.ts, kind: e.kind, from: e.from, to: e.to, by: e.by })) });
     const h = (this.state.hourly ||= { entries: 0, exits: 0, pnl: 0 });
     h.exits++; h.pnl += pnl;
     await this.trackStreak(pnl, now);

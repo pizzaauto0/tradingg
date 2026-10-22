@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="dashboard.css">
 </head>
 <body class="dash">
+  <nav id="views"><button data-v="live" class="active">📈 Live</button><button data-v="hist">🧾 Bisherige Trades</button></nav>
   <div id="app">
     <aside id="markets"></aside>
     <section id="main">
@@ -17,6 +18,19 @@
       <div id="panels"></div>
     </section>
   </div>
+  <div id="hist" hidden>
+    <div id="hsum"></div>
+    <div id="hwrap">
+      <aside id="hside"><div id="hfilter"></div><div id="hlist"></div></aside>
+      <section id="hmain">
+        <div id="hhead"></div>
+        <div id="hchartwrap"><canvas id="hchart"></canvas><div id="htip" hidden></div></div>
+        <div id="hlegend" class="muted"></div>
+        <div id="hdet"></div>
+      </section>
+    </div>
+  </div>
   <script src="dashboard.js" type="module"></script>
+  <script src="trades-view.js" type="module"></script>
 </body>
 </html>

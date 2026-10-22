@@ -51,3 +51,5 @@ h1 { font-size:20px; } h2 { font-size:15px; margin:22px 0 6px; }
 .tablewrap { overflow-x:auto; }
 table td:nth-child(2) { word-break:break-all; min-width:140px; }
 header button.btn { padding:3px 8px; font-size:12px; margin-right:6px; }
+.trow { cursor:pointer; border-left:4px solid var(--line); } .trow.up { border-left-color:var(--ok); } .trow.down { border-left-color:var(--bad); }
+.trow2 { display:flex; justify-content:space-between; gap:8px; padding:5px 8px; margin:3px 0; border-left:3px solid var(--ok); border-radius:4px; background:var(--bg); cursor:pointer; font-size:12px; } .trow2.down { border-left-color:var(--bad); }
