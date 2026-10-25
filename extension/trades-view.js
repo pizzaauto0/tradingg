@@ -76,7 +76,7 @@ function renderDetail() {
     tile("Ziel", tps.length ? fmt(tps.at(-1).price) : "–", tps.length > 1 ? `Start ${fmt(tps[0].price)} · ${tps.length - 1}× verschoben` : tps.length ? "nicht verschoben" : "nicht erfasst"),
     tile("Gebühren", `${fmt(t.fees)} USD`, `Phase: ${{ uptrend: "Aufwärts", downtrend: "Abwärts", sideways: "Seitwärts" }[t.regime] ?? "–"}`)),
     adj.length ? h("div", { class: "chips" }, ...adj.map((a) => h("span", { class: "pill2" }, `${new Date(a.ts).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} ${a.kind === "stop" ? "Stop" : "Ziel"} ${fmt(a.from)} → ${fmt(a.to)} (${a.by})`))) : null,
-    h("div", { class: "muted sm" }, String(t.reason || "").slice(0, 160)));
+    t.analysis ? h("div", { class: "analysis" }, ...String(t.analysis).split("\n").map((x) => h("div", {}, x))) : h("div", { class: "muted sm" }, String(t.reason || "").slice(0, 160)));
   $("hlegend").replaceChildren(h("span", {}, h("i", { style: "background:#9aa3ae" }), "Einstieg"), h("span", {}, h("i", { style: "background:#ef6b5c" }), "Stop-Loss"), h("span", {}, h("i", { style: "background:#4cc26a" }), "Ziel"), h("span", {}, "▲ Kauf  ▼ Verkauf  ● verschoben"));
 }
 

@@ -212,7 +212,7 @@ async function modeData(botId, mode, now, hours = 1) {
   const evts = main ? (await getLocal("eventLog", [])).filter((e) => (e.bot || DEFAULT_BOT) === botId) : (state.events || []);
   const prices = Object.fromEntries(Object.entries(state.activity || {}).filter(([, a]) => a.price != null).map(([s, a]) => [s, a.price]));
   const sum = summarizeMode({ capital, trades, positions: state.positions, prices, eqLog: main ? [] : eqLog });
-  return { bot: botId, botLabel: BOTS[botId].label, mode, main, now: nowMs, hours, capital, equity, cash, sum, positions: state.positions, prices, state, eqLog,
+  return { bot: botId, botLabel: BOTS[botId].label, weakShare: cfg.risk.weakMarketShare, mode, main, now: nowMs, hours, capital, equity, cash, sum, positions: state.positions, prices, state, eqLog,
     trades: trades.filter((t) => Date.parse(t.ts) >= from && (t.action === "ENTRY" || t.action === "EXIT")), allTrades: trades,
     decisions: (state.decisions || []).filter((x) => Date.parse(x.ts) >= from), approved: state.approved.length,
     active: state.approved.filter((a) => a.active !== false).map((a) => `${a.symbol.split("/")[0]} ${a.title || a.name}`),

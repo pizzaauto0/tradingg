@@ -3,6 +3,7 @@
 // gleiche Märkte, gleiche Regeln, nur andere Strategie-Auswahl. So entstehen vergleichbare Statistiken. Reine Hilfsfunktionen (kein Speicherzugriff).
 import { fmtPx } from "./util.js";
 import { strategyLabel, stamp } from "./names.js";
+import { exitKind } from "./history.js";
 import { botAssets } from "./config.js";
 import { performance } from "./profit.js";
 
@@ -69,13 +70,37 @@ export function logText(d, kind) {
   L.push(`Käufe und Verkäufe im Zeitraum (${d.trades.length}):`);
   for (const t of d.trades) {
     L.push(`  ${new Date(t.ts).toLocaleTimeString("de-DE")} ${t.action === "ENTRY" ? "KAUF   " : t.action === "EXIT" ? "VERKAUF" : t.action} ${t.symbol} @ ${fmtPx(t.price)}${t.pnl != null ? ` | Ergebnis netto ${sg(t.pnl)} USD` : ""} | ${strategyLabel(t.strategy || "")}`);
-    if (t.reason) L.push(`      Warum: ${String(t.reason).replace(/\s*\n\s*/g, " ").slice(0, 400)}`);
+    if (t.reason) L.push(`      Warum: ${String(t.reason).replace(/\s*\n\s*/g, " ").slice(0, 700)}`);
+    if (t.analysis) for (const a of String(t.analysis).split("\n")) L.push(`      ${a}`);
   }
   if (!d.trades.length) L.push("  keine");
-  if (kind === "hour" && d.decisions.length) {
+  // Märkte jetzt: Kurs, Phase, ADX, gewählte Strategie – damit man im Nachhinein sieht, was der Bot gesehen hat
+  const acts = Object.entries(d.state?.activity || {}).filter(([, a]) => a && !a.error && a.price != null), br = d.state?.breadth;
+  if (acts.length) {
     L.push("");
-    L.push("Entscheidungen je Kerze (Auszug):");
-    for (const x of d.decisions.slice(-25)) L.push(`  ${new Date(x.ts).toLocaleTimeString("de-DE")} ${String(x.text).replace(/^.*? · /, "")}`);
+    L.push(`Märkte (aktueller Stand)${br ? ` · Marktbreite: ${br.weak} von ${br.n} unter der EMA50${br.n >= 3 && br.weak / br.n >= (d.weakShare || 0.7) ? " → Marktfilter sperrt neue Käufe" : ""}` : ""}:`);
+    for (const [s, a] of acts) L.push(`  ${s.padEnd(10)} ${String(fmtPx(a.price)).padStart(10)} · ${{ uptrend: "Aufwärts", downtrend: "Abwärts", sideways: "Seitwärts" }[a.regime] || "–"}${a.adx != null ? ` (ADX ${a.adx.toFixed(0)})` : ""} · ${a.strategy ? strategyLabel(a.strategy) : "keine passende Strategie"} · Signal ${a.signal == null ? "–" : a.signal ? "JA" : "nein"}`);
+  }
+  const cool = Object.entries(d.state?.symCool || {}).filter(([, c]) => Date.parse(c.until) > d.now), lock = Object.entries(d.state?.stratLoss || {}).filter(([, c]) => c.until && Date.parse(c.until) > d.now);
+  if (cool.length || lock.length) {
+    L.push(""); L.push("Gesperrt:");
+    for (const [s, c] of cool) L.push(`  ${s}: Abkühlung nach Stop-Loss bis ${hm(Date.parse(c.until))}`);
+    for (const [k, c] of lock) L.push(`  ${k.split("|")[0]} · ${strategyLabel(k.split("|")[1])}: Strategie-Sperre bis ${hm(Date.parse(c.until))}`);
+  }
+  // Auswertung über alle abgeschlossenen Trades dieses Modus: wo kommt der Gewinn/Verlust her?
+  const ex = (d.allTrades || []).filter((t) => t.action === "EXIT" && t.pnl != null);
+  if (ex.length) {
+    const group = (key) => { const m = new Map(); for (const t of ex) { const k = key(t), g = m.get(k) || { n: 0, w: 0, sum: 0 }; g.n++; g.w += t.pnl > 0 ? 1 : 0; g.sum += t.pnl; m.set(k, g); } return [...m].sort((a, b) => a[1].sum - b[1].sum); };
+    L.push(""); L.push(`Auswertung aller ${ex.length} abgeschlossenen Trades (netto, nach Gebühren):`);
+    for (const [title, key] of [["je Strategie", (t) => strategyLabel(t.strategy || "")], ["je Markt", (t) => t.symbol], ["je Ausstiegsgrund", (t) => exitKind(t.reason)]]) {
+      L.push(`  ${title}:`);
+      for (const [k, g] of group(key)) L.push(`    ${String(k).padEnd(24)} ${String(g.n).padStart(3)} Trades · ${g.w} im Plus · ${sg(g.sum)} USD`);
+    }
+  }
+  if (d.decisions.length) {
+    L.push("");
+    L.push(`Entscheidungen je Kerze (${kind === "hour" ? "Auszug" : "letzte"}, ${Math.min(d.decisions.length, kind === "hour" ? 80 : 40)} von ${d.decisions.length}):`);
+    for (const x of d.decisions.slice(kind === "hour" ? -80 : -40)) L.push(`  ${new Date(x.ts).toLocaleTimeString("de-DE")} ${String(x.text).replace(" · Kerze geprüft", "")}`);
   }
   if (d.errors?.length) { L.push(""); L.push("Fehler/Hinweise:"); for (const e of d.errors.slice(-10)) L.push(`  ! ${e}`); }
   return L.join("\r\n") + "\r\n";

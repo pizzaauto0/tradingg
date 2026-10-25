@@ -16,3 +16,11 @@ test("Strategie-Sperre: nach 2 Verlusten in Folge gesperrt, Gewinn setzt zurück
   await Engine.prototype.trackStrategy.call(me, pos, 1, now);
   assert.equal(me.state.stratLoss["SOL/USD|range_support(1)"].n, 0);
 });
+
+test("Verlust-Analyse nennt Ursachen (Rauschen, Marktschwäche, Lücke unter dem Stop)", () => {
+  const me = { cfg: { timeframe: "15m", trail: { startPct: 5 } }, state: { breadth: { n: 10, weak: 9 } } };
+  const pos = { symbol: "RAY/USD", entryPrice: 100, initialStop: 99, stop: 99, entryFee: 0.3, openedAt: "2026-01-01T10:00:00Z", hi: 100.1, lo: 97.5 };
+  const txt = Engine.prototype.explainExit.call(me, pos, { price: 98, amount: 1.4, fee: 0.3 }, "Stop-Loss bei 99.00 ausgelöst", new Date("2026-01-01T10:02:00Z"), -3.4);
+  assert.match(txt, /Kurs -2\.00 %/); assert.match(txt, /Ursache:/);
+  assert.match(txt, /nach 2 Min/); assert.match(txt, /Kurslücke/); assert.match(txt, /nie nennenswert im Plus/); assert.match(txt, /9 von 10/);
+});

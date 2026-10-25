@@ -1,5 +1,5 @@
 // Hauptlogik pro Durchlauf (Port von tradingbot/engine.py), mehrere Märkte gleichzeitig (SOL, BTC, ETH, je USD).
-import { atr, classifyMarket, summarize } from "./indicators.js";
+import { atr, classifyMarket, ema, summarize } from "./indicators.js";
 import { buildStrategy } from "./strategies.js";
 import { positionSize, RiskManager, stopAndTarget } from "./risk.js";
 import { selectStrategy } from "./pipeline.js";
@@ -94,6 +94,9 @@ export class Engine {
       if (this.cfg.risk.closePositionsOnDailyLimit) await this.flatten("Tagesverlust-Limit", now);
     }
 
+    // Marktbreite: wie viele Märkte dieses Bots liegen unter ihrer 50er-Linie (EMA50)? Bei einem breit fallenden Markt verlieren Long-Käufe meist
+    { let n = 0, weak = 0; for (const d of Object.values(data)) { const v = last(ema(d.closed.close, 50)); if (Number.isFinite(v)) { n++; if (last(d.closed.close) < v) weak++; } } state.breadth = { n, weak, ts: now.toISOString() }; }
+
     // 4) Beobachten und ggf. einsteigen
     for (const [sym, d] of Object.entries(data)) {
       const obs = this.observe(sym, d, now, tfMs);
@@ -158,6 +161,7 @@ export class Engine {
     let low = price;
     for (let i = 0; i < live.t.length; i++) if (live.t[i] > entryCandle) low = Math.min(low, live.low[i]);
 
+    pos.hi = Math.max(pos.hi ?? pos.entryPrice, price, last(live.high)); pos.lo = Math.min(pos.lo ?? pos.entryPrice, price, last(live.low));   // bester/schlechtester Kurs seit Einstieg (für die Verlust-Analyse)
     let fill = null;
     if (low <= pos.stop) { // Stop erreicht -> Verkauf; währenddessen als "unklar" markieren, falls der Browser dabei beendet wird
       this.state.pending = { what: `Stop-Verkauf ${sym}`, ts: now.toISOString() };
@@ -299,21 +303,48 @@ export class Engine {
 
   async recordExit(pos, fill, reason, now) {
     const pnl = (fill.price - pos.entryPrice) * fill.amount - pos.entryFee - fill.fee;
+    const analysis = this.explainExit(pos, fill, reason, now, pnl);
     delete this.state.positions[pos.symbol];
     this.exitedThisTick.add(pos.symbol); // kein Wiedereinstieg im selben Durchlauf
     await this.save();
     await this.logTrade({ ts: now.toISOString(), mode: this.broker.mode, symbol: pos.symbol, action: "EXIT", price: fill.price,
       amount: fill.amount, fee: fill.fee, pnl, strategy: pos.strategyName, regime: pos.regime, reason, equity: await this.equity(),
-      entryTs: pos.openedAt, entryPrice: pos.entryPrice, initStop: pos.initialStop, initTp: (pos.history || []).find((e) => e.kind === "tp")?.from ?? pos.takeProfit, stop: pos.stop, takeProfit: pos.takeProfit,
+      analysis, entryTs: pos.openedAt, entryPrice: pos.entryPrice, initStop: pos.initialStop, initTp: (pos.history || []).find((e) => e.kind === "tp")?.from ?? pos.takeProfit, stop: pos.stop, takeProfit: pos.takeProfit,
       adj: (pos.history || []).map((e) => ({ ts: e.ts, kind: e.kind, from: e.from, to: e.to, by: e.by })) });
     const h = (this.state.hourly ||= { entries: 0, exits: 0, pnl: 0 });
     h.exits++; h.pnl += pnl;
     await this.trackStreak(pnl, now);
     await this.trackStrategy(pos, pnl, now);
+    const cd = this.cfg.safety?.symbolCooldownHours;
+    if (cd > 0 && pnl < 0 && !pos.manual && /Stop-Loss|Tagesverlust/.test(reason)) (this.state.symCool ||= {})[pos.symbol] = { until: new Date(now.getTime() + cd * 3.6e6).toISOString() };
     const held = (Date.parse(now.toISOString()) - Date.parse(pos.openedAt)) / 3.6e6, costs = pos.entryFee + fill.fee;
     await this.notify(`EXIT ${pos.symbol} · ${strategyLabel(pos.strategyName)}\n` +
       `Verkauf @ ${fmtPx(fill.price)} (Einstieg ${fmtPx(pos.entryPrice)}, ${pctOf(fill.price, pos.entryPrice)}) · Ergebnis ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} USD netto (Gebühren ${costs.toFixed(2)} USD) · gehalten ${held < 48 ? held.toFixed(1) + " h" : (held / 24).toFixed(1) + " Tage"}\n` +
-      `Stop war ${fmtPx(pos.stop)}, Ziel ${fmtPx(pos.takeProfit)}\nWarum verkauft: ${reason}`);
+      `Stop war ${fmtPx(pos.stop)}, Ziel ${fmtPx(pos.takeProfit)}\nWarum verkauft: ${reason}\n${analysis}`);
+  }
+
+  // Warum ist dieser Trade so ausgegangen? Kurze, nachvollziehbare Analyse für Log, Dashboard und Discord
+  explainExit(pos, fill, reason, now, pnl) {
+    const tfMs = timeframeSeconds(this.cfg.timeframe) * 1000, held = now.getTime() - Date.parse(pos.openedAt), p = (x) => `${x >= 0 ? "+" : ""}${x.toFixed(2)} %`;
+    const move = (fill.price / pos.entryPrice - 1) * 100, gross = (fill.price - pos.entryPrice) * fill.amount, fees = pos.entryFee + fill.fee;
+    const mfe = ((pos.hi ?? pos.entryPrice) / pos.entryPrice - 1) * 100, mae = ((pos.lo ?? pos.entryPrice) / pos.entryPrice - 1) * 100, stopDist = ((pos.entryPrice - (pos.initialStop ?? pos.stop)) / pos.entryPrice) * 100;
+    const lines = [`Analyse: Kurs ${p(move)} (${fmtPx(pos.entryPrice)} → ${fmtPx(fill.price)}) · brutto ${gross >= 0 ? "+" : ""}${gross.toFixed(2)} USD, Gebühren −${fees.toFixed(2)} USD → netto ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)} USD · zwischendurch bestenfalls ${p(mfe)}, schlechtestenfalls ${p(mae)}`];
+    const causes = [];
+    if (pnl < 0) {
+      if (/Tagesverlust/.test(reason)) causes.push("Notausstieg wegen Tagesverlust-Limit (alle Bots zusammen)");
+      if (/Stop-Loss/.test(reason)) {
+        const gap = ((pos.stop - fill.price) / pos.stop) * 100;
+        if (gap > 0.15) causes.push(`Ausführung ${gap.toFixed(2)} % unter dem Stop (Kurslücke/Rutschen) – Verlust größer als geplant`);
+        if (held < 3 * tfMs) causes.push(`Stop schon nach ${Math.max(1, Math.round(held / 60000))} Min ausgelöst; er war nur ${stopDist.toFixed(2)} % entfernt (Marktrauschen)`);
+      }
+      if (mfe < 0.3) causes.push("Kurs war nie nennenswert im Plus – der Einstieg lief direkt gegen den Markt (fallender Kurs)");
+      else if (mfe >= 1) causes.push(`Kurs war zeitweise ${p(mfe)} im Plus, der Gewinn wurde nicht gesichert (Trailing startet erst ab ${this.cfg.trail?.startPct ?? 5} %)`);
+      const br = this.state.breadth;
+      if (br && br.n >= 3 && br.weak / br.n >= 0.5) causes.push(`Gesamtmarkt schwach: ${br.weak} von ${br.n} Märkten unter ihrer EMA50`);
+      if (gross > 0) causes.push("Brutto im Plus, aber die Gebühren haben den Gewinn aufgefressen");
+    }
+    if (causes.length) lines.push(`Ursache: ${causes.join(" · ")}`);
+    return lines.join("\n");
   }
 
   // Verlustserie: nach maxLossStreak Verlusten in Folge keine neuen Käufe dieses Bots für pauseHours (Abkühlphase); ein Gewinn setzt die Serie zurück
@@ -407,10 +438,17 @@ export class Engine {
         : `${REGIME_DE[market.regime] || market.regime}: ${strategyLabel(sel.strategy.name)} → Signal ${signal ? "JA" : "nein"}`;
       const log = this.state.decisions ||= [];
       this.log("info", `${sym} · Kerze ${new Date(stamp).toLocaleString("de-DE", { dateStyle: "short", timeStyle: "short" })} · ${what}${this.state.positions[sym] ? " · Position offen" : ""}${this.risk.halted ? " · Tageslimit aktiv" : ""}`);
-      log.push({ ts: now.toISOString(), symbol: sym, text: `${sym} · Kerze geprüft · ${what}${this.state.positions[sym] ? " · Position offen" : ""}${this.risk.halted ? " · Tageslimit aktiv" : ""}` });
-      this.state.decisions = log.slice(-40);
+      log.push({ ts: now.toISOString(), symbol: sym, text: `${sym} · Kerze geprüft · ${what} · Kurs ${fmtPx(last(live.close))}${market ? ` · ADX ${market.adx != null ? market.adx.toFixed(0) : "–"}` : ""}${this.state.positions[sym] ? " · Position offen" : ""}${this.risk.halted ? " · Tageslimit aktiv" : ""}` });
+      this.state.decisions = log.slice(-150);
     }
     return { market, sel, signal };
+  }
+
+  // Ein Signal wurde NICHT gekauft: Grund merken (Anzeige „Warum nicht?“) und im Entscheidungs-Log festhalten
+  skip(sym, text, now) {
+    (this.state.entryBlocked ||= {})[sym] = { ts: now.toISOString(), text };
+    this.log("info", `${sym}: Signal, aber kein Kauf: ${text}`);
+    (this.state.decisions ||= []).push({ ts: now.toISOString(), symbol: sym, text: `${sym} · Signal JA, aber KEIN KAUF: ${text}` });
   }
 
   // ---- Einstiege ----
@@ -422,11 +460,16 @@ export class Engine {
     const { market, sel, signal } = obs;
     if (!market || !sel || !signal) return;
     const { strategy } = sel;
-    if (this.stratLocked(sym, strategy.name, now)) { this.log("info", `${sym}: ${strategyLabel(strategy.name)} gesperrt (Verlustserie) – kein Einstieg`); return; }
+    if (this.stratLocked(sym, strategy.name, now)) return this.skip(sym, `${strategyLabel(strategy.name)} gesperrt (Verlustserie)`, now);
+    const cool = this.state.symCool?.[sym];
+    if (cool && now.getTime() < Date.parse(cool.until)) return this.skip(sym, `Abkühlung nach Stop-Loss bis ${new Date(cool.until).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`, now);
+    const br = this.state.breadth, share = this.cfg.risk.weakMarketShare ?? 0;
+    if (share > 0 && br && br.n >= 3 && br.weak / br.n >= share) return this.skip(sym, `Markt schwach: ${br.weak} von ${br.n} Märkten liegen unter ihrer EMA50 – keine neuen Käufe`, now);
 
     const price = last(live.close), atrValue = last(atr(closed, this.cfg.risk.atrPeriod));
     const risk = { ...this.cfg.risk, atrStopMult: strategy.stopMult(this.cfg.risk.atrStopMult), takeProfitRr: strategy.rr(this.cfg.risk.takeProfitRr) };
-    const [stop0, tp0] = stopAndTarget(price, atrValue, risk);
+    const minStop = this.cfg.risk.minStopPct > 0 ? (price * this.cfg.risk.minStopPct) / 100 : 0, widened = minStop > atrValue * risk.atrStopMult;
+    const [stop0, tp0] = stopAndTarget(price, widened ? minStop / risk.atrStopMult : atrValue, risk);
     if (stop0 <= 0) { console.warn(`${sym}: ATR unbrauchbar, kein Einstieg`); return; }
     // Stop und Ziel gelten ab dem ERWARTETEN Kaufpreis (Kurs + Rutschen), nicht ab dem Kurs ohne Rutschen – sonst kann ein Ziel unter dem echten Einstand liegen
     const entryPx = price * (1 + this.cfg.costs.slippagePct / 100), shift = entryPx - price, stop = stop0 + shift, takeProfit = tp0 + shift;
@@ -434,9 +477,7 @@ export class Engine {
     const roundTrip = price * 2 * (this.cfg.costs.feePct + this.cfg.costs.slippagePct) / 100, minMult = this.cfg.risk.minRewardToCost ?? 0;
     if (minMult > 0 && takeProfit - entryPx < minMult * roundTrip) {
       const text = `Ziel nur ${(((takeProfit - entryPx) / entryPx) * 100).toFixed(2)} % entfernt, Kosten für Kauf+Verkauf ${((roundTrip / price) * 100).toFixed(2)} % – verlangt wird mindestens das ${minMult}-fache`;
-      (this.state.entryBlocked ||= {})[sym] = { ts: now.toISOString(), text };
-      this.log("info", `${sym}: Signal, aber kein Kauf: ${text}`);
-      return;
+      return this.skip(sym, text, now);
     }
     const equity = await this.equity();
     const raw = positionSize(this.risk.sizingEquity(equity), await this.broker.cash(), entryPx, stop, this.cfg.risk, this.cfg.costs);
@@ -445,7 +486,7 @@ export class Engine {
 
     const riskCash = amount * (entryPx - stop);
     const reason = `${sel.record.explore ? "EXPERIMENTELL (Strategie hat die strengen Prüfungen NICHT bestanden/wurde nicht geprüft): " : ""}${sel.record.title ? `${sel.record.title} – ` : ""}${strategy.explain(closed)}; Marktphase: ${summarize(market)}; Stop ${fmtPx(stop)} ` +
-      `(${risk.atrStopMult}x ATR), Ziel ${fmtPx(takeProfit)}; Risiko ca. ${riskCash.toFixed(2)} ` +
+      `(${widened ? `Mindestabstand ${this.cfg.risk.minStopPct} %` : `${risk.atrStopMult}x ATR`}), Ziel ${fmtPx(takeProfit)}; Risiko ca. ${riskCash.toFixed(2)} ` +
       `(${((riskCash / equity) * 100).toFixed(2)}% des Kapitals); Backtest: Sharpe ${(sel.record.metrics?.sharpe ?? 0).toFixed(2)}, Trefferquote ${(sel.record.metrics?.win_rate_pct ?? 0).toFixed(1)}%`;
 
     this.state.pending = { what: `Kauf ${sym}`, ts: now.toISOString() };

@@ -146,3 +146,9 @@ Im Dashboard jedes Bots gibt es oben die Reiter **📈 Live** und **🧾 Bisheri
 ## Schutz vor Kauf-und-sofort-Verkauf (aus der Log-Analyse)
 - **Mindest-Haltedauer** (Einstellung „Mindest-Haltedauer vor Ausstiegssignal“, Standard 3 Kerzen): Ausstiegssignale der Strategie gelten erst danach. Stop-Loss, Take-Profit und Trailing gelten immer.
 - **Strategie-Sperre** (Standard: 2 Verluste in Folge → 24 h): Dieselbe Strategie auf demselben Markt kauft dann nicht mehr; alle anderen laufen weiter. Meldung „SPERRE …“ in Discord. Manuelle Trades zählen nicht.
+
+## Neu nach der 2-Tage-Auswertung (Schutz vor fallenden Märkten)
+- **Marktfilter:** Liegen 70 % oder mehr der Märkte eines Bots unter ihrer EMA50, kauft der Bot nichts Neues (⚙ „Marktfilter“, 0 = aus).
+- **Abkühlung nach Stop-Loss:** Derselbe Markt wird 4 Stunden nicht nachgekauft (⚙ Sicherheit).
+- **Mindest-Stopabstand 1,5 %:** Zu enge Stops (2×ATR bei ruhigen Märkten) werden verbreitert; die Position wird dafür kleiner, das Risiko bleibt gleich.
+- **Ausführlichere Logs:** Jeder Verkauf hat eine „Analyse“ (Kursbewegung, brutto/Gebühren/netto, bestes/schlechtestes, Ursache). Die Stunden-Logs zeigen zusätzlich den Stand aller Märkte, Marktbreite, Sperren, eine Auswertung je Strategie/Markt/Ausstiegsgrund und alle Entscheidungen mit Markt, Kurs und ADX – auch „Signal ja, aber kein Kauf, weil …“. Die Analyse steht auch im Dashboard (Bisherige Trades) und in Discord.

@@ -12,7 +12,7 @@ export function pairTrades(trades) {
       if (!entryTs || entryPrice == null) continue;
       const adj = t.adj || [], firstStop = adj.find((a) => a.kind === "stop"), firstTp = adj.find((a) => a.kind === "tp");
       out.push({ id: `${t.symbol}@${t.ts}`, symbol: t.symbol, entryTs, exitTs: t.ts, entryPrice, exitPrice: t.price, amount: t.amount, pnl: t.pnl, fees: (en?.fee || 0) + (t.fee || 0),
-        strategy: t.strategy, regime: t.regime, kind: exitKind(t.reason), reason: t.reason, adj,
+        strategy: t.strategy, regime: t.regime, kind: exitKind(t.reason), reason: t.reason, analysis: t.analysis || "", adj,
         initStop: t.initStop ?? firstStop?.from ?? null, initTp: t.initTp ?? firstTp?.from ?? t.takeProfit ?? null, stop: t.stop ?? null, takeProfit: t.takeProfit ?? null });
     }
   }
