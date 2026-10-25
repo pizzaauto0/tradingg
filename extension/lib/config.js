@@ -65,7 +65,7 @@ export const DEFAULTS = {
   // maxLossStreak = so viele Verluste in Folge pausieren die Käufe dieses Bots für pauseHours Stunden (0 = aus).
   // Vergleichs-Modi (Desktop-App): neben dem Haupt-Modus laufen die übrigen Modi als Schatten-Läufe mit eigenem Paper-Geld (siehe compare.js).
   // enabled: null = automatisch (an in der Desktop-App, aus in der Erweiterung); je Modus abschaltbar.
-  compare: { enabled: null, strict: true, explore: true, playbook: true, winrate: true, final: true },
+  compare: { enabled: null, lab: true, strict: true, explore: true, playbook: true, winrate: true, final: true },
   safety: { maxDrawdownPct: 15, maxLossStreak: 4, pauseHours: 6, stratMaxLosses: 2, stratPauseHours: 24, symbolCooldownHours: 4 },
   trail: { enabled: true, startPct: 5, startUsd: 40, startR: 1.0, lockFraction: 0.75, extendTp: true },
   costs: { feePct: 0.26, slippagePct: 0.20 }, // je Order (Kauf UND Verkauf); bewusst hoch angesetzt – lieber zu viele Kosten als zu wenige

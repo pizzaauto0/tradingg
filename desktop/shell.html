@@ -28,6 +28,8 @@
     .perfgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; margin-top: 6px; } .perfgrid div { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
     .perfgrid small { display: block; color: var(--muted); font-size: 11px; } .perfgrid strong { font-size: 15px; }
     #pbreaker { margin: 12px 16px 0; padding: 10px 12px; border-radius: 8px; background: rgba(192,57,43,.14); border: 1px solid var(--bad); color: var(--fg); } #pstrat { width: 100%; border-collapse: collapse; margin-top: 6px; } #pstrat td, #pstrat th { padding: 5px 6px; text-align: right; border-bottom: 1px solid var(--line); } #pstrat td:first-child, #pstrat th:first-child { text-align: left; }
+    #lab { flex: 1; overflow: auto; padding-bottom: 16px; } .chips2 { display: flex; gap: 6px; margin-top: 6px; } .chip { padding: 4px 14px; border: 1px solid var(--line); border-radius: 999px; background: none; color: var(--muted); cursor: pointer; font: inherit; } .chip.on { border-color: var(--accent); color: var(--fg); background: var(--card); } .sm { font-size: 12px; margin-top: 2px; }
+    .mvtable tr.grp td { background: var(--card); font-weight: 700; text-align: left; } .mvtable tr.best td { background: rgba(46,160,67,.12); } .mvtable tr.offrow td { color: var(--muted); opacity: .6; }
     #subtabs { display: flex; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; } #subtabs button { padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--muted); cursor: pointer; font: inherit; font-size: 12px; }
     #subtabs button.active { color: var(--fg); border-color: var(--accent); background: var(--card); } #subtabs button.off { opacity: .45; }
     #modeview, #compare { flex: 1; overflow: auto; padding-bottom: 16px; } .mvhead { padding: 10px 16px 0; } .mvhead h2 { margin: 0 0 2px; font-size: 16px; } .tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; border: 1px solid var(--line); color: var(--muted); }
@@ -67,6 +69,10 @@
     <div class="pbox"><div class="prow"><b>Modus-Vergleich: alle Modi aller Bots nebeneinander</b><span><button class="btn" id="cmpLogs">📂 Log-Ordner öffnen</button> <button class="btn" id="cmpReset" title="Schatten-Läufe auf frisches Paper-Geld zurücksetzen">↺ Schatten-Läufe zurücksetzen</button></span></div>
       <div class="muted" style="font-size:12px;margin:4px 0 8px">Je Bot läuft der <b>Haupt-Modus (★)</b> mit dem gemeinsamen Paper-Konto; die anderen Modi laufen als <b>Schatten</b> mit eigenem Paper-Geld (gleiche Märkte und Regeln, andere Strategie-Auswahl). Gewinn = realisiert (netto nach Gebühren) + offen. Jede Stunde und alle 6 Stunden wird je Modus eine Log-Datei gespeichert.</div>
       <div style="overflow-x:auto"><table id="cmpTable"></table></div></div>
+  </div>
+  <div id="lab" hidden>
+    <div class="pbox"><div class="prow"><b>🧪 Labor: viele Varianten, jeweils nur 1 Einstellung anders</b><span><button class="btn" id="labLogs">📂 Log-Ordner (lab)</button> <button class="btn" id="labReset">↺ Zurücksetzen</button></span></div><div id="labbots" class="chips2"></div></div>
+    <div id="labbody"></div>
   </div>
   <div id="profit" hidden>
     <div id="pbreaker" hidden></div>

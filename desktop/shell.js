@@ -2,7 +2,7 @@
 // Jeder Tab ist die unveränderte Popup-Seite der Erweiterung mit ?bot=<id>.
 import { ago, strategyLabel } from "./lib/names.js";
 const BOTS = [["fx", "Währungen"], ["metals", "Silber & Gold"], ["crypto", "Krypto"]];
-const TABS = [...BOTS, ["dash", "📊 Dashboard"], ["profit", "💰 Profit"], ["compare", "📊 Vergleich"]];
+const TABS = [...BOTS, ["dash", "📊 Dashboard"], ["profit", "💰 Profit"], ["compare", "📊 Vergleich"], ["lab", "🧪 Labor"]];
 const MODES = [["strict", "Streng"], ["explore", "Erkunden"], ["playbook", "Playbook"], ["winrate", "Trefferquote"], ["final", "Final-3"]];
 let modes = null;                 // Antwort von getModes (Vergleichstabelle), alle paar Sekunden aktualisiert
 const subMode = {};               // gewählter Modus je Bot (Standard: der Haupt-Modus)
@@ -20,9 +20,10 @@ function select(id) {
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.bot === id));
   document.querySelectorAll("iframe").forEach((f) => f.classList.toggle("active", f.dataset.bot === id));
   const isBot = BOTS.some(([b]) => b === id), sub = isBot ? (subMode[id] || mainOf(id)) : null, showFrame = isBot && sub === mainOf(id);
-  $("frames").hidden = !showFrame; $("dashframe").hidden = id !== "dash"; if (id === "dash" && !$("dashframe").src) $("dashframe").src = "__alldash.html"; $("profit").hidden = id !== "profit"; $("compare").hidden = id !== "compare"; $("modeview").hidden = !(isBot && !showFrame); $("subtabs").hidden = !isBot;
+  $("frames").hidden = !showFrame; $("dashframe").hidden = id !== "dash"; if (id === "dash" && !$("dashframe").src) $("dashframe").src = "__alldash.html"; $("profit").hidden = id !== "profit"; $("compare").hidden = id !== "compare"; $("lab").hidden = id !== "lab"; $("modeview").hidden = !(isBot && !showFrame); $("subtabs").hidden = !isBot;
   if (id === "profit") renderProfit();
   if (id === "compare") renderCompare();
+  if (id === "lab") renderLab();
   if (isBot) { renderSubtabs(id); if (!showFrame) renderMode(id, sub); }
 }
 
@@ -42,9 +43,11 @@ for (const [id, label] of BOTS) {
   b.dataset.bot = "profit"; b.id = "tab-profit"; b.textContent = "💰 Profit"; b.onclick = () => select("profit");
   const dsh = document.createElement("button");
   dsh.dataset.bot = "dash"; dsh.id = "tab-dash"; dsh.textContent = "📊 Dashboard"; dsh.onclick = () => select("dash");
+  const lb = document.createElement("button");
+  lb.dataset.bot = "lab"; lb.id = "tab-lab"; lb.textContent = "🧪 Labor"; lb.onclick = () => select("lab");
   const c = document.createElement("button");
   c.dataset.bot = "compare"; c.id = "tab-compare"; c.textContent = "📊 Vergleich"; c.onclick = () => select("compare");
-  $("tabs").append(dsh, b, c);
+  $("tabs").append(dsh, b, c, lb);
 }
 
 // ---- Modi: Unter-Tabs je Bot, Detailansicht eines Schatten-Modus, Vergleichstabelle ----
@@ -122,6 +125,35 @@ async function renderCompare() {
   }
   t.replaceChildren(...rows);
 }
+// ---- Labor: Varianten, die sich von der Basis in genau einer Einstellung unterscheiden ----
+let labBot = "crypto";
+async function renderLab() {
+  let d; try { d = await call("getLab"); } catch (e) { $("labbody").replaceChildren(el("div", "pbox", e.message)); return; }
+  if ($("lab").hidden) return;
+  const b = d.bots.find((x) => x.bot === labBot) || d.bots[0], rows = b.rows, base = rows[0];
+  $("labbots").replaceChildren(...d.bots.map((x) => { const c = el("button", `chip${x.bot === labBot ? " on" : ""}`, x.label); c.onclick = () => { labBot = x.bot; renderLab(); }; return c; }));
+  const parts = [];
+  if (!b.enabled) parts.push(el("div", "pbox", "Das Labor ist für diesen Bot ausgeschaltet (⚙ Einstellungen → Vergleichs-Modi → Labor)."));
+  const intro = el("div", "pbox");
+  intro.append(el("b", null, `BASIS: Playbook · Zeitrahmen ${base.timeframe} · ${money(base.equity)} · ${sgn(base.profit)} USD · ${base.closed} Trades`),
+    el("div", "muted", "Jede Zeile ändert gegenüber der Basis genau EINE Einstellung (eigenes Paper-Geld). Δ = Gewinn minus Basis. Blasse Zeilen haben unter 8 Trades – noch nicht aussagekräftig."));
+  parts.push(intro);
+  if (b.insights.length) { const ins = el("div", "pbox"); ins.append(el("b", null, "Auffälligkeiten")); for (const t of b.insights) ins.append(el("div", "sm", `• ${t}`)); parts.push(ins); }
+  const t = el("table", "mvtable"), hr = el("tr");
+  ["Variante", "Eigenkapital", "Gewinn", "Δ Basis", "Trades", "Treffer", "PF", "Gebühren", "Ø Einsatz", "offen"].forEach((h) => hr.append(el("th", null, h))); t.append(hr);
+  let grp = null;
+  for (const r of rows) {
+    if (r.group !== grp && r.group !== "base") { grp = r.group; const g = el("tr", "grp"), td = el("td", null, r.groupLabel); td.colSpan = 10; g.append(td); t.append(g); }
+    const tr = el("tr", r.id === "base" ? "best" : r.closed < 8 ? "offrow" : ""), cells = [r.label, r.equity.toFixed(2), sgn(r.profit), r.id === "base" ? "–" : sgn(r.delta), String(r.closed), r.winRate == null ? "–" : `${r.winRate.toFixed(0)} %`,
+      r.profitFactor === Infinity ? "∞" : r.profitFactor == null ? "–" : r.profitFactor.toFixed(2), r.fees.toFixed(2), r.avgSizePct == null ? "–" : `${r.avgSizePct.toFixed(0)} %`, String(r.open)];
+    cells.forEach((x, i) => { const td = el("td", i === 2 || i === 3 ? (Number.parseFloat(x) > 0 ? "ok" : Number.parseFloat(x) < 0 ? "bad" : "") : "", x); if (i === 0) td.title = r.change; tr.append(td); });
+    t.append(tr);
+  }
+  const w = el("div", "pbox"); w.style.overflowX = "auto"; w.append(t); parts.push(w);
+  $("labbody").replaceChildren(...parts);
+}
+$("labLogs").onclick = () => window.electronBridge?.openLogs();
+$("labReset").onclick = async () => { if (!confirm("Alle Labor-Läufe auf frisches Paper-Geld zurücksetzen? Ihre Trades und Statistiken werden gelöscht.")) return; try { await call("resetLab"); renderLab(); } catch (e) { alert(e.message); } };
 $("cmpLogs").onclick = () => window.electronBridge?.openLogs();
 $("cmpReset").onclick = async () => { if (!confirm("Alle Schatten-Läufe auf frisches Paper-Geld zurücksetzen? Ihre Trades und Statistiken werden gelöscht (der Haupt-Modus bleibt unberührt).")) return; try { await call("resetShadows"); await renderCompare(); } catch (e) { alert(e.message); } };
 
@@ -280,6 +312,6 @@ $("killAll").onclick = act(async () => {
 
 refresh();
 loadModes().then(() => select(active));
-setInterval(async () => { await loadModes(); if (BOTS.some(([b]) => b === active)) { renderSubtabs(active); const sub = subMode[active] || mainOf(active); if (sub !== mainOf(active)) renderMode(active, sub); } if (active === "compare") renderCompare(); }, 15000);
+setInterval(async () => { await loadModes(); if (BOTS.some(([b]) => b === active)) { renderSubtabs(active); const sub = subMode[active] || mainOf(active); if (sub !== mainOf(active)) renderMode(active, sub); } if (active === "compare") renderCompare(); if (active === "lab") renderLab(); }, 15000);
 setInterval(refresh, 5000);
 setInterval(renderProfit, 15000);

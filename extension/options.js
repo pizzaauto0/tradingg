@@ -27,6 +27,7 @@ const SECTIONS = [
   ]],
   ["Vergleichs-Modi (Schatten-Läufe mit eigenem Paper-Geld)", [
     ["compare.enabled", "Vergleichs-Modi aktiv", "bool", "Neben dem Haupt-Modus (Tab „Strategien“, handelt mit dem gemeinsamen Konto) laufen die übrigen Modi dieses Bots als Schatten mit eigenem Paper-Geld – gleiche Märkte und Regeln, andere Strategie-Auswahl. Ergebnisse: Unter-Tabs und Tab „📊 Vergleich“; jede Stunde und alle 6 Stunden wird je Modus eine Log-Datei gespeichert. Nur in der Desktop-App."],
+    ["compare.lab", "Labor: ~45 Varianten je Bot (jeweils nur 1 Einstellung anders) mitlaufen lassen", "bool", "Jede Variante hat eigenes Paper-Geld und läuft mit allen Zeitrahmen/Risiko-Stufen. Ergebnisse im Tab „Labor“ und in den Log-Dateien (Ordner lab)."],
     ["compare.strict", "Modus Streng mitlaufen lassen", "bool"],
     ["compare.explore", "Modus Erkunden mitlaufen lassen", "bool"],
     ["compare.playbook", "Modus Playbook mitlaufen lassen", "bool"],

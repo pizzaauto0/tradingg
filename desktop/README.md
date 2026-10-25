@@ -152,3 +152,11 @@ Im Dashboard jedes Bots gibt es oben die Reiter **📈 Live** und **🧾 Bisheri
 - **Abkühlung nach Stop-Loss:** Derselbe Markt wird 4 Stunden nicht nachgekauft (⚙ Sicherheit).
 - **Mindest-Stopabstand 1,5 %:** Zu enge Stops (2×ATR bei ruhigen Märkten) werden verbreitert; die Position wird dafür kleiner, das Risiko bleibt gleich.
 - **Ausführlichere Logs:** Jeder Verkauf hat eine „Analyse“ (Kursbewegung, brutto/Gebühren/netto, bestes/schlechtestes, Ursache). Die Stunden-Logs zeigen zusätzlich den Stand aller Märkte, Marktbreite, Sperren, eine Auswertung je Strategie/Markt/Ausstiegsgrund und alle Entscheidungen mit Markt, Kurs und ADX – auch „Signal ja, aber kein Kauf, weil …“. Die Analyse steht auch im Dashboard (Bisherige Trades) und in Discord.
+
+## 🧪 Labor: viele Varianten, jeweils nur EINE Einstellung anders
+Tab **🧪 Labor**: Pro Bot laufen ca. 45 Schatten-Läufe mit eigenem Paper-Geld (je 300 USD). Die **BASIS** ist Playbook mit den Einstellungen des Bots; **jede Variante ändert genau eine Sache** (nie zwei auf einmal), damit man erkennt, woran ein Unterschied liegt:
+Zeitrahmen (5m/15m/30m/1h/1d) · Risiko pro Trade · max. Positionsgröße (10/25/100 %) · Stop-Abstand (1–4×ATR) · Ziel (1–4×) · Mindest-Stopabstand · Kosten-Filter · Marktfilter · Mindest-Haltedauer · Anzahl Positionen (1/4/8) · Abkühlung nach Stop · Strategie-Sperre · Trailing-Start/aus/Sicherungsanteil · nur BTC/ETH/SOL.
+- Tabelle mit Gewinn, **Δ gegenüber der Basis**, Trades, Trefferquote, Profitfaktor, Gebühren, Ø Einsatz (% Kapital). Zeilen mit unter 8 Trades sind blass (noch nicht aussagekräftig). Darüber „Auffälligkeiten“: je Gruppe die beste/schlechteste Abweichung.
+- Log-Dateien: `logs/lab/<bot>/stunde_…txt` und `6h_…txt` (mit allen Verkäufen der letzten 6 Stunden inkl. Ursache). Abschaltbar unter ⚙ Vergleichs-Modi → Labor. „↺ Zurücksetzen“ startet frisch.
+- Hinweis zum Risiko: Die Positionsgröße ist durch „max. Positionsgröße“ (50 %) gedeckelt – Risiko-Stufen über etwa 0,75 % ändern daher nichts; deshalb gibt es die Gruppe „Max. Positionsgröße“ (bis 100 %) als eigene Einzel-Änderung.
+- Kursdaten werden zwischen den Varianten geteilt (kurzer Zwischenspeicher), die Strategie-Sets je Zeitrahmen nur einmal geprüft.

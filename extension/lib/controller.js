@@ -15,6 +15,7 @@ import { DiscordBot, postPanel } from "./discordbot.js";
 import { buildStatsEmbed } from "./stats.js";
 import { MODE_IDS, MODE_LABEL, logText, shadowCfg, shadowKeys, shadowModes, summarizeMode } from "./compare.js";
 import { pairTrades } from "./history.js";
+import { labInsights, labLogText, labRows, labVariants } from "./lab.js";
 import { appendEquity, byBot, equityAt, byStrategy, performance, periodStats, realized, sampleCurve, tradesToCsv } from "./profit.js";
 
 let current = null; // laufender Durchlauf (Promise) – es läuft nie mehr als einer gleichzeitig
@@ -140,10 +141,11 @@ export function runTick(opts = {}) {
 async function tickAll(opts) {
   for (const id of BOT_IDS) await tickOnce(id, opts);
   if (!opts?.skipShadows) await tickShadows(opts?.fetchFn, opts?.now ?? new Date());
+  if (!opts?.skipShadows) await tickLab(opts?.fetchFn, opts?.now ?? new Date()).catch((e) => console.warn("Labor:", e.message));
   await recordEquity(opts?.now);
   await checkBreaker(opts?.fetchFn, opts?.now);
   await dailyReport(opts?.fetchFn, opts?.now);
-  if (!opts?.skipShadows) await writeModeLogs(opts?.now ?? new Date());
+  if (!opts?.skipShadows) { await writeModeLogs(opts?.now ?? new Date()); await writeLabLogs(opts?.now ?? new Date()); }
   await flushLogs(opts?.fetchFn);
   await updateLiveMessage(opts?.fetchFn).catch((e) => console.warn("Discord-Live-Nachricht:", e.message));
 }
@@ -194,6 +196,94 @@ async function tickShadows(fetchFn = fetch, now = new Date()) {
       try { await tickShadow(botId, main, mode, { fetchFn, now, cache, budget }); } catch (e) { console.warn(`Schatten ${botId}/${mode}:`, e.message); }
     }
   }
+}
+
+// ---- Labor: viele Varianten, die sich von der Basis in genau einer Einstellung unterscheiden (siehe lab.js) ----
+const labData = new Map();   // Kursdaten, von allen Varianten geteilt: je Zeitrahmen+Markt
+const LAB_TTL = { "5m": 60e3, "15m": 120e3, "30m": 180e3, "1h": 300e3, "1d": 600e3 };
+let labLast = 0, labBusy = false;
+function labFetch(cfg, sym, fetchFn, nowMs) {
+  const key = `${cfg.timeframe}|${sym}`, hit = labData.get(key);
+  if (hit && nowMs - hit.at < (LAB_TTL[cfg.timeframe] || 120e3)) return hit.p;
+  const p = fetchRecent(cfg, sym, fetchFn); labData.set(key, { at: nowMs, p }); p.catch(() => labData.delete(key));
+  return p;
+}
+const labOn = (main) => !!main.compare?.enabled && main.compare.lab !== false;
+const slimState = (st) => {   // nur, was zum Weiterlaufen und Anzeigen nötig ist (hält die gespeicherte Datenmenge klein)
+  st.approved = []; st.report = []; st.decisions = (st.decisions || []).slice(-30); st.events = (st.events || []).slice(-15);
+  for (const [s, a] of Object.entries(st.activity || {})) st.activity[s] = { ts: a.ts, price: a.price, regime: a.regime, adx: a.adx, strategy: a.strategy, signal: a.signal, error: a.error };
+};
+
+async function tickLab(fetchFn = fetch, now = new Date()) {
+  const nowMs = now.getTime();
+  if (labBusy || nowMs - labLast < 55e3) return;
+  labBusy = true; labLast = nowMs;
+  try {
+    const budget = { left: 1 };
+    for (const botId of BOT_IDS) {
+      let main; try { main = await loadConfig(botId); } catch { continue; }
+      if (!labOn(main)) continue;
+      const variants = labVariants(main, botId), lab = (await getLocal(`lab_${botId}`, null)) || { startedAt: now.toISOString(), variants: {} }, shared = await getLocal(`labShared_${botId}`, {});
+      let sharedDirty = false;
+      for (const tf of new Set(variants.map((v) => v.cfg.timeframe))) {   // Strategie-Sets je Zeitrahmen einmal prüfen und teilen
+        const s = shared[tf], stale = !s || (s.retryAt ? nowMs >= Date.parse(s.retryAt) : (nowMs - Date.parse(s.at)) / 3.6e6 >= main.pipeline.revalidateHours);
+        if (!stale || budget.left <= 0) continue;
+        budget.left--;
+        const cfgTf = variants.find((v) => v.cfg.timeframe === tf).cfg;
+        try { const res = await researchAndBacktest(cfgTf, fetchFn, await sharedHistories(cfgTf, fetchFn)); shared[tf] = { at: now.toISOString(), approved: res.approved }; }
+        catch (e) { shared[tf] = { approved: s?.approved || [], at: s?.at || now.toISOString(), error: e.message, retryAt: new Date(nowMs + 10 * 60e3).toISOString() }; }
+        sharedDirty = true;
+      }
+      for (const v of variants) {
+        const cfg = v.cfg, s = shared[cfg.timeframe]; if (!s) continue;
+        const syms = cfg.assets.map(symbolOf), entry = (lab.variants[v.id] ||= { state: defaultState(), account: { cash: cfg.capital.start, values: {} }, trades: [], eq: [] }), st = entry.state;
+        st.approved = (s.approved || []).filter((a) => syms.includes(a.symbol)); st.lastRefresh = s.at; st.enabled = true;
+        const frames = await Promise.all(syms.map((sym) => labFetch(cfg, sym, fetchFn, nowMs).then((f) => f.t.at(-1)).catch(() => null))), sig = frames.join(",");
+        if (entry.sig === sig && !Object.keys(st.positions || {}).length) { slimState(st); continue; }   // nichts Neues und keine Position zu überwachen
+        const events = st.events || [], notify = async (text) => { events.push({ ts: now.toISOString(), text: String(text).split("\n")[0].slice(0, 300) }); };
+        notify.log = () => {}; notify.report = async () => {};
+        entry.account.values ||= {};
+        const engine = new Engine({ cfg, state: st, broker: new PaperBroker(cfg, st, entry.account), notify, botId: `${botId}:lab:${v.id}`, fetchRecent: (sym) => labFetch(cfg, sym, fetchFn, nowMs),
+          logTrade: async (row) => { entry.trades = [...entry.trades, { ...row, bot: botId, mode: `lab:${v.id}` }].slice(-150); }, save: async () => {},
+          refresher: async () => ({ approved: s.approved || [], report: [], problems: [] }) });
+        try { await engine.tick(now); st.lastError = null; entry.sig = sig; } catch (e) { st.lastError = e.message; }
+        st.lastTick = now.toISOString(); st.events = events.slice(-15);
+        const eq = entry.account.cash + Object.values(st.positions).reduce((x, p) => x + p.amount * (st.activity?.[p.symbol]?.price ?? p.entryPrice), 0);
+        if (!entry.eq.length || nowMs - entry.eq.at(-1)[0] >= 10 * 60e3) entry.eq = [...entry.eq, [nowMs, eq]].slice(-600);
+        slimState(st);
+      }
+      await setLocal(`lab_${botId}`, lab);
+      if (sharedDirty) await setLocal(`labShared_${botId}`, shared);
+    }
+  } finally { labBusy = false; }
+}
+
+export async function getLab() {
+  const out = [];
+  for (const botId of BOT_IDS) {
+    const main = await loadConfig(botId), variants = labVariants(main, botId), lab = await getLocal(`lab_${botId}`, null), rows = labRows(variants, lab?.variants || {});
+    out.push({ bot: botId, label: BOTS[botId].label, enabled: labOn(main), startedAt: lab?.startedAt || null, rows, insights: labInsights(rows) });
+  }
+  return { bots: out, now: new Date().toISOString() };
+}
+
+async function writeLabLogs(now) {
+  const write = globalThis.desktopLog;
+  if (typeof write !== "function") return;
+  const pad = (n) => String(n).padStart(2, "0"), day = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`, hr = pad(now.getHours());
+  const marks = await getLocal("logMarks", {});
+  try {
+    for (const botId of BOT_IDS) {
+      const main = await loadConfig(botId); if (!labOn(main)) continue;
+      const lab = await getLocal(`lab_${botId}`, null); if (!lab) continue;
+      const key = `lab/${botId}`, m = marks[key] || {}, hourKey = `${day}-${hr}`, sixKey = `${day}-${Math.floor(now.getHours() / 6)}`, variants = labVariants(main, botId), rows = labRows(variants, lab.variants);
+      const args = { botLabel: BOTS[botId].label, now: now.getTime(), rows, entries: lab.variants, variants };
+      if (m.h !== hourKey) { await write(`lab/${botId}/stunde_${day}_${hr}h.txt`, labLogText({ ...args, kind: "hour" })); m.h = hourKey; }
+      if (m.s !== sixKey) { await write(`lab/${botId}/6h_${day}_${hr}h.txt`, labLogText({ ...args, kind: "6h", since: now.getTime() - 6 * 3.6e6 })); m.s = sixKey; }
+      marks[key] = m;
+    }
+  } catch (e) { console.warn("Labor-Logs:", e.message); }
+  await setLocal("logMarks", marks);
 }
 
 // Daten eines Modus (Haupt oder Schatten) für Vergleich, Detailansicht und Log-Dateien
@@ -546,10 +636,14 @@ async function handleInner(msg, fetchFn = fetch) {
     case "getAccount": return { ...(await getAccount()), today: (await getProfit()).periods.today };
     case "getProfit": return getProfit();
     case "getModes": return getModes();
+    case "getLab": return getLab();
+    case "resetLab": { for (const id of BOT_IDS) { await removeLocal(`lab_${id}`); await removeLocal(`labShared_${id}`); } labData.clear(); labLast = 0; return true; }
     case "getOverview": return getOverview();
     case "getModeDetail": return getModeDetail(botId, MODE_IDS.includes(msg.mode) ? msg.mode : cfg.backtest.profile);
     case "resetShadows": {   // Schatten-Läufe auf Anfang (frisches Paper-Geld, keine Trades) – für einen sauberen Neustart des Vergleichs
       for (const id of BOT_IDS) for (const m of MODE_IDS) { const k = shadowKeys(id, m); for (const key of Object.values(k)) await removeLocal(key); }
+      for (const id of BOT_IDS) { await removeLocal(`lab_${id}`); await removeLocal(`labShared_${id}`); }
+      labData.clear(); labLast = 0;
       await setLocal("logMarks", {});
       return true;
     }
